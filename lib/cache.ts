@@ -152,6 +152,15 @@ export class TaskCache {
     return out;
   }
 
+  /** Tasks not done and not cancelled, subtasks included (the native badge). */
+  openCount(): number {
+    let open = 0;
+    for (const row of this.#rows.values()) {
+      if (!CLOSED_STATUSES.includes(row.status)) open += 1;
+    }
+    return open;
+  }
+
   countsByStatus(): Record<Status, number> {
     const counts: Record<Status, number> = {
       in_progress: 0,

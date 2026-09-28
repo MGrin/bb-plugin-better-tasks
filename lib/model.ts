@@ -105,6 +105,11 @@ export interface Changes {
 export const CHANNEL_DELTA = "delta";
 export const CHANNEL_META = "meta";
 export const CHANNEL_TOUCHED = "touched";
+export const CHANNEL_OPEN_COUNT = "open-count";
+
+export interface OpenCountSignal {
+  open: number;
+}
 
 /**
  * A delta signal. Small change sets carry their rows; a large one (a resync)

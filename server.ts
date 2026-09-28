@@ -88,6 +88,10 @@ export const rpcContract = defineRpcContract({
     input: z.object({ query: z.string().trim().min(2).max(200) }).strict(),
     output: z.object({ ids: z.array(z.string()), truncated: z.boolean() }),
   },
+  openCount: {
+    input: z.null(),
+    output: z.object({ open: z.number().int().nonnegative().nullable() }),
+  },
   stats: {
     input: z.null(),
     output: z.custom<Record<string, unknown>>(),
@@ -221,6 +225,9 @@ export default function plugin(bb: BbPluginApi) {
         ids: page.tasks.map((task) => task.id),
         truncated: page.nextCursor !== null,
       };
+    },
+    openCount() {
+      return { open: sync.openCount };
     },
     stats() {
       return {

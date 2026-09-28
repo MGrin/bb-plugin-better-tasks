@@ -8,11 +8,13 @@ import { TaskCache, type TaskFields } from "./cache.ts";
 import {
   CHANNEL_DELTA,
   CHANNEL_META,
+  CHANNEL_OPEN_COUNT,
   CHANNEL_TOUCHED,
   CLOSED_STATUSES,
   OPEN_STATUSES,
   type Changes,
   type DeltaSignal,
+  type OpenCountSignal,
   type Label,
   type LiveThread,
   type Project,
@@ -126,6 +128,8 @@ export class TaskSync {
   #timer: ReturnType<typeof setTimeout> | null = null;
   #flushing: Promise<void> | null = null;
   #published = 0;
+  #openLoaded = false;
+  #publishedOpen: number | null = null;
   #disposed = false;
   #touchedDuringLoad: Set<string> | null = null;
   #loading: Promise<void> | null = null;
@@ -187,6 +191,7 @@ export class TaskSync {
       if (this.stats.openReadyMs === null) {
         this.stats.openReadyMs = performance.now() - started;
       }
+      this.#openLoaded = true;
       this.#resolveOpen();
       this.#publishChanges();
       await this.#readPages({ statuses: [...CLOSED_STATUSES] }, seen);
@@ -404,5 +409,19 @@ export class TaskSync {
         : { kind: "range", from: changes.from, to: changes.to };
     this.#published = version;
     this.#publish(CHANNEL_DELTA, signal);
+    this.#publishOpenCount();
+  }
+
+  /** Open tasks across every project, or null until open work has loaded. */
+  get openCount(): number | null {
+    return this.#openLoaded ? this.cache.openCount() : null;
+  }
+
+  #publishOpenCount(): void {
+    const open = this.openCount;
+    if (open === null || open === this.#publishedOpen) return;
+    this.#publishedOpen = open;
+    const signal: OpenCountSignal = { open };
+    this.#publish(CHANNEL_OPEN_COUNT, signal);
   }
 }

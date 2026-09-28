@@ -15,20 +15,14 @@ import {
   PRIORITIES,
   PRIORITY_LABEL,
   STATUS_LABEL,
+  STATUSES,
   type Priority,
   type Status,
 } from "@/lib/model";
 import { cn } from "@/lib/utils";
 
-/** Menu order for picking a status: the workflow, not the list order. */
-export const STATUS_MENU_ORDER: Status[] = [
-  "backlog",
-  "todo",
-  "in_progress",
-  "in_review",
-  "done",
-  "canceled",
-];
+/** Menu and 1–6 key order: the same order as the views. */
+export const STATUS_MENU_ORDER: readonly Status[] = STATUSES;
 
 function LazyMenu({
   label,

@@ -165,3 +165,14 @@ test("virtual: reveal scrolls only when the item is out of view", () => {
   assert.equal(scrollToReveal(offsets, 20, 0, 400), 440);
   assert.equal(scrollToReveal(offsets, 2, 400, 400), 80);
 });
+
+test("view: one status order for list and board, backlog first", () => {
+  assert.deepEqual(visibleStatuses(DEFAULT_FILTERS), [
+    "backlog",
+    "todo",
+    "in_progress",
+    "in_review",
+    "done",
+    "canceled",
+  ]);
+});

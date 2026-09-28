@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DetailPane } from "@/components/detail-pane";
 import { SidebarOpenCount } from "@/components/sidebar-count";
+import { cn } from "@/lib/utils";
 import { STATUS_MENU_ORDER } from "@/components/menus";
 import {
   ActionsContext,
@@ -429,8 +430,11 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
             }
             onHelp={() => setHelpOpen(true)}
           />
-          <div className="flex min-h-0 flex-1">
-            <main className="flex min-w-0 flex-1 flex-col" aria-busy={firstLoad}>
+          <div className="@container/body flex min-h-0 flex-1">
+            <main
+              className={cn("flex min-w-0 flex-1 flex-col", detailOpen && "@max-[720px]/body:hidden")}
+              aria-busy={firstLoad}
+            >
               {error !== null ? (
                 <div role="alert" className="m-4 rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm">
                   <p className="text-destructive">Could not load tasks: {error}</p>
@@ -486,7 +490,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
             </main>
             {detailOpen ? (
               detailId === null ? (
-                <aside className="flex w-[min(480px,45%)] min-w-80 shrink-0 items-center justify-center border-l border-border text-sm text-muted-foreground">
+                <aside className="flex w-[min(480px,45%)] min-w-80 shrink-0 items-center justify-center border-l border-border text-sm text-muted-foreground @max-[720px]/body:w-full @max-[720px]/body:border-l-0">
                   {store.closedLoaded ? `No task ${detailKey}` : "Loading…"}
                 </aside>
               ) : (

@@ -8,12 +8,13 @@
   },
   "bb": {
     "name": "Better Tasks",
-    "description": "A BB plugin with an example todo list.",
+    "description": "A fast task board: every task in every project, open work first, list and board views, live updates without reloading.",
     "branding": {
       "icon": "ListTodo"
     },
     "server": "./server.ts",
-    "app": "./app.tsx"
+    "app": "./app.tsx",
+    "skills": []
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.7",
@@ -46,5 +47,19 @@
     "sonner": "^1.7.4",
     "tailwind-merge": "^3.4.0",
     "vaul": "^1.1.2"
+  },
+  "description": "A fast task board for bb: every task, open work first, virtualized, incremental updates.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MGrin/bb-plugin-better-tasks.git"
+  },
+  "keywords": [
+    "bb-plugin"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "bb plugin build"
   }
 }

@@ -38,12 +38,12 @@ function liveTitle(row: Row): string {
   return row.live.map((thread) => `${thread.liveStatus === "starting" ? "Starting" : "Working"}: ${thread.title}`).join("\n");
 }
 
-function LabelChips({ ids, max }: { ids: readonly string[]; max: number }) {
+function LabelChips({ ids, max, className }: { ids: readonly string[]; max: number; className?: string }) {
   const { labels } = useContext(LookupContext);
   if (ids.length === 0) return null;
   const shown = ids.slice(0, max);
   return (
-    <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden">
+    <span className={cn("flex min-w-0 shrink items-center gap-1 overflow-hidden", className)}>
       {shown.map((id) => {
         const label = labels.get(id);
         if (label === undefined) return null;
@@ -109,13 +109,13 @@ export const TaskRow = memo(function TaskRow({
           actions.open(row.id);
         }}
         className={cn(
-          "min-w-0 flex-1 truncate text-left outline-none",
+          "min-w-20 flex-1 truncate text-left outline-none",
           row.status === "done" || row.status === "canceled" ? "text-muted-foreground" : "text-foreground",
         )}
       >
         {row.title}
       </button>
-      <LabelChips ids={row.labelIds} max={2} />
+      <LabelChips ids={row.labelIds} max={2} className="@max-[560px]/list:hidden" />
       {row.live.length > 0 ? (
         <span className="flex shrink-0 items-center gap-1 pl-1 text-[11px] text-emerald-600 dark:text-emerald-400" title={liveTitle(row)}>
           <LiveDot />

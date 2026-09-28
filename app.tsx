@@ -432,7 +432,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
           />
           <div className="@container/body flex min-h-0 flex-1">
             <main
-              className={cn("flex min-w-0 flex-1 flex-col", detailOpen && "@max-[720px]/body:hidden")}
+              className={cn("@container/list flex min-w-0 flex-1 flex-col", detailOpen && "@max-[720px]/body:hidden")}
               aria-busy={firstLoad}
             >
               {error !== null ? (

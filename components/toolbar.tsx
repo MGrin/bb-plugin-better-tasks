@@ -135,7 +135,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
   const projectById = new Map(projects.map((project) => [project.id, project]));
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-3">
+    <div className="@container/bar flex min-h-12 shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-2">
       <Menu
         label="Projects"
         active={scopedProjects.length > 0}
@@ -146,7 +146,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
             ) : (
               <Icon name="Layers" className="size-3.5" />
             )}
-            <span className="max-w-40 truncate font-medium text-foreground">{scopeLabel}</span>
+            <span className="max-w-40 truncate font-medium text-foreground @max-[640px]/bar:max-w-28">{scopeLabel}</span>
             <Icon name="ChevronDown" className="size-3 opacity-60" />
           </>
         }
@@ -177,7 +177,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
         ))}
       </Menu>
 
-      <div className="mx-1 h-5 w-px bg-border" />
+      <div className="mx-1 h-5 w-px bg-border @max-[640px]/bar:hidden" />
 
       <div className="flex shrink-0 items-center rounded-md bg-surface-recessed-solid p-0.5" role="group" aria-label="View">
         {(["list", "board"] as const).map((mode) => (
@@ -193,7 +193,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
             )}
           >
             <Icon name={mode === "list" ? "ListView" : "Columns2"} className="size-3.5" />
-            {mode === "list" ? "List" : "Board"}
+            <span className="@max-[640px]/bar:sr-only">{mode === "list" ? "List" : "Board"}</span>
           </button>
         ))}
       </div>
@@ -204,7 +204,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
         trigger={
           <>
             <Icon name="FilterHorizontal" className="size-3.5" />
-            Filter
+            <span className="@max-[640px]/bar:sr-only">Filter</span>
             {filterCount > 0 ? (
               <span className="rounded bg-state-active px-1 text-[11px] tabular-nums text-foreground">{filterCount}</span>
             ) : null}
@@ -286,7 +286,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
         trigger={
           <>
             <Icon name="ArrowUpDown" className="size-3.5" />
-            {SORT_LABEL[filters.sort]}
+            <span className="@max-[640px]/bar:sr-only">{SORT_LABEL[filters.sort]}</span>
           </>
         }
       >
@@ -304,9 +304,9 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
         {formatCount(shownOpen)} open · {formatCount(total)} total
       </span>
 
-      <div className="flex-1" />
+      <div className="flex-1 @max-[640px]/bar:hidden" />
 
-      <label className="relative flex h-8 w-64 min-w-40 shrink items-center rounded-md border border-input bg-transparent focus-within:ring-1 focus-within:ring-ring">
+      <label className="relative flex h-8 w-64 min-w-40 shrink items-center rounded-md border border-input bg-transparent focus-within:ring-1 focus-within:ring-ring @max-[640px]/bar:order-last @max-[640px]/bar:w-full @max-[640px]/bar:min-w-0">
         <Icon name="Search" className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground" />
         <input
           ref={searchRef}
@@ -322,7 +322,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
           }}
           placeholder="Search tasks"
           aria-label="Search tasks"
-          className="h-full min-w-0 flex-1 bg-transparent pl-8 pr-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground"
+          className="h-full min-w-0 flex-1 bg-transparent pl-8 pr-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground @max-[640px]/bar:text-base"
         />
         {filters.search !== "" ? (
           <>
@@ -341,11 +341,11 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
             </button>
           </>
         ) : (
-          <kbd className="mr-2 shrink-0 rounded border border-border px-1 font-mono text-[10px] text-muted-foreground">/</kbd>
+          <kbd className="mr-2 shrink-0 rounded border border-border px-1 font-mono text-[10px] text-muted-foreground @max-[640px]/bar:hidden">/</kbd>
         )}
       </label>
 
-      <ToolbarButton aria-label="Keyboard shortcuts" onClick={onHelp} className="px-2">
+      <ToolbarButton aria-label="Keyboard shortcuts" onClick={onHelp} className="px-2 @max-[640px]/bar:hidden">
         <Icon name="CircleQuestion" className="size-4" />
       </ToolbarButton>
     </div>

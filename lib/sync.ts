@@ -48,6 +48,7 @@ export interface SyncStats {
   flushes: number;
   cursorRestarts: number;
   failedLoads: number;
+  untargetedSignals: number;
   lastFlushMs: number;
   lastFullLoadMs: number;
   openReadyMs: number | null;
@@ -103,6 +104,7 @@ export class TaskSync {
     flushes: 0,
     cursorRestarts: 0,
     failedLoads: 0,
+    untargetedSignals: 0,
     lastFlushMs: 0,
     lastFullLoadMs: 0,
     openReadyMs: null,
@@ -235,8 +237,18 @@ export class TaskSync {
       );
       return;
     }
-    if (typeof taskId !== "string") return;
     this.stats.signalsReceived += 1;
+    if (typeof taskId !== "string") {
+      // A change we cannot pin to one task: re-read everything (coalesced
+      // with any load already running) so no row stays stale.
+      if (channel === "tasks:changed" || channel === "threads:changed") {
+        this.stats.untargetedSignals += 1;
+        void this.requestFullLoad().catch((error: unknown) =>
+          this.#log(`resync after untargeted signal failed: ${String(error)}`),
+        );
+      }
+      return;
+    }
     if (channel === "tasks:changed") this.#taskQueue.add(taskId);
     else if (channel === "threads:changed") this.#threadQueue.add(taskId);
     else if (channel === "comments:changed") {

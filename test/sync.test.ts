@@ -130,3 +130,18 @@ test("a cursor invalidated mid-read restarts that pass instead of failing the lo
   assert.equal(sync.cache.size, 1200);
   assert.equal(sync.loaded, true);
 });
+
+test("a change signal without a taskId resyncs and drops the stale row", async () => {
+  const { fake, sync } = setup();
+  const keep = task();
+  const gone = task();
+  fake.add(keep, gone);
+  await sync.fullLoad();
+  fake.tasks.delete(gone.id);
+  fake.tasks.set(keep.id, { ...keep, status: "in_review" });
+  sync.onSignal("tasks:changed", { projectId: keep.projectId });
+  await sync.requestFullLoad();
+  assert.equal(sync.cache.get(gone.id), undefined);
+  assert.equal(sync.cache.get(keep.id)?.status, "in_review");
+  assert.equal(sync.stats.untargetedSignals, 1);
+});

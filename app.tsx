@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DetailPane } from "@/components/detail-pane";
+import { SidebarOpenCount } from "@/components/sidebar-count";
 import { STATUS_MENU_ORDER } from "@/components/menus";
 import {
   ActionsContext,
@@ -536,5 +537,6 @@ export default definePluginApp((app) => {
     icon: "ListTodo",
     path: PANEL_PATH,
     component: BoardPage,
+    experimental_sidebarAccessory: SidebarOpenCount,
   });
 });

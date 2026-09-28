@@ -145,3 +145,27 @@ test("a change signal without a taskId resyncs and drops the stale row", async (
   assert.equal(sync.cache.get(keep.id)?.status, "in_review");
   assert.equal(sync.stats.untargetedSignals, 1);
 });
+
+test("the open count matches the native badge and is announced only when it moves", async () => {
+  const { fake, sync, published } = setup();
+  const parent = task({ status: "in_progress" });
+  const child = task({ status: "todo", parentTaskId: parent.id });
+  const other = task({ status: "backlog" });
+  fake.add(parent, child, other, task({ status: "done" }), task({ status: "canceled" }));
+  assert.equal(sync.openCount, null, "no count before open work has loaded");
+  await sync.fullLoad();
+  const counts = () =>
+    published.filter((entry) => entry.channel === "open-count").map((entry) => (entry.payload as { open: number }).open);
+  assert.equal(sync.openCount, 3, "subtasks count, done and cancelled do not");
+  assert.deepEqual(counts(), [3]);
+
+  fake.tasks.set(other.id, { ...other, title: "Renamed" });
+  sync.onSignal("tasks:changed", { taskId: other.id });
+  await sync.settle();
+  assert.deepEqual(counts(), [3], "a change that keeps the count publishes nothing new");
+
+  fake.tasks.set(child.id, { ...child, status: "done" });
+  sync.onSignal("tasks:changed", { taskId: child.id });
+  await sync.settle();
+  assert.deepEqual(counts(), [3, 2]);
+});

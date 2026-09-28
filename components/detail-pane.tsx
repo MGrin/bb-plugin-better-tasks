@@ -119,7 +119,7 @@ export function DetailPane({
   return (
     <aside
       aria-label={`Task ${key}`}
-      className="flex w-[min(480px,45%)] min-w-80 shrink-0 flex-col border-l border-border bg-background"
+      className="flex w-[min(480px,45%)] min-w-80 shrink-0 flex-col border-l border-border bg-background @max-[720px]/body:w-full @max-[720px]/body:border-l-0"
     >
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
         {project ? <ColorDot color={project.color} /> : null}
@@ -247,7 +247,7 @@ export function DetailPane({
           ) : detail === null ? (
             <p className="text-sm text-muted-foreground">This task no longer exists.</p>
           ) : task && task.description.trim() !== "" ? (
-            <Markdown content={task.description} className="text-[13px]" />
+            <Markdown content={task.description} className="@container min-w-0 text-[13px]" />
           ) : (
             <p className="text-sm text-muted-foreground">No description.</p>
           )}
@@ -312,8 +312,8 @@ export function DetailPane({
                       {comment.kind === "system" ? (
                         <p>{comment.body}</p>
                       ) : (
-                        <div className="rounded-lg border border-border bg-card px-3 py-2">
-                          <Markdown content={comment.body} className="text-[13px]" />
+                        <div className="min-w-0 rounded-lg border border-border bg-card px-3 py-2">
+                          <Markdown content={comment.body} className="@container min-w-0 text-[13px]" />
                         </div>
                       )}
                     </li>

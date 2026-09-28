@@ -1,141 +1,113 @@
-# bb-plugin-better-tasks
+# Better Tasks
 
-A BB plugin that keeps a todo list. It shows every surface a plugin can own:
+A fast task board for [bb](https://github.com/get-bb/bb). Every task in every
+project, open work first, in a list or a board — and it stays fast when the
+board holds thousands of tasks and agents are changing them all day.
 
-- `server.ts` — the backend: a todo store in `bb.storage.kv`, RPC methods
-  for the page, a `bb better-tasks` CLI command, a setting, and a realtime signal
-  that keeps every open page current.
-- `app.tsx` — the frontend: an **Example todos** page in the left sidebar
-  (`app.slots.navPanel`) built from the vendored components.
-- `skills/example-todos/SKILL.md` — a skill that tells agents how to keep the list
-  with `bb better-tasks`. BB imports it into agent threads automatically.
-- `PLUGIN_OVERVIEW.md` — the store listing text: a longer version of
-  `bb.description` that the plugin detail page shows under it. See
-  [Store listing](#store-listing).
+It reads and writes through bb's built-in **Tasks** plugin. It keeps no data of
+its own and never touches the Tasks database: your tasks stay where they are,
+and both pages show the same board.
 
-Try it: install the plugin, open **Example todos** in the sidebar, then run
-`bb better-tasks add "Ship it"` in a terminal. The page updates at once.
+## What it does
 
-## UI components
+- **Everything, open work first.** In progress, in review, todo and backlog
+  load first. Done and canceled are one click away — collapsed groups in the
+  list, collapsed columns on the board — never a wall of history.
+- **List and board**, per project or across all of them.
+- **Search** over key and title as you type, plus the task descriptions
+  (searched by the Tasks plugin, shown as `+N`).
+- **Filters** by project, status, priority, label and "agent working now".
+  Filters, view and collapsed groups persist per browser.
+- **Change status and priority in place** — from a row, a card, the detail
+  pane, drag a card between columns, or with the keyboard.
+- **Who is on it.** A green pulse marks tasks with a thread starting or
+  working right now; the detail pane lists every attached thread and jumps to
+  it.
+- **Detail pane** with the description, sub-tasks, threads and activity,
+  deep-linkable at `/plugins/better-tasks/board/task/<KEY>`, and a link to the
+  same task in the built-in Tasks page.
 
-`components/ui/` is vendored source you own (the shadcn model): edit the
-files freely — they never update out from under you. Add more from the BB
-component registry (the full shadcn set, version-matched to your BB install
-via the pinned ref in `components.json`):
+### Keyboard
 
-```
-npx shadcn add @bb/select @bb/table
-```
+| Key | Action |
+|---|---|
+| `j` / `↓`, `k` / `↑` | Next / previous task |
+| `h` / `l` | Previous / next column (board) |
+| `Enter` | Open task |
+| `Esc` | Close task, then clear selection |
+| `/` | Search |
+| `v` | Switch list / board |
+| `1`–`6` | Status: backlog, todo, in progress, in review, done, canceled |
+| `⇧1`–`⇧5` | Priority: urgent, high, medium, low, none |
+| `?` | Shortcut help |
 
-Run `npm install` once before `bb plugin build` — the vendored components'
-npm deps bundle into your dist. React, and BB-shimmed packages like the
-radix portal primitives and `sonner` (`import { toast } from "sonner"`
-reaches BB's own toaster), are provided by the BB app at runtime and never
-bundled. Every shimmed package is declared in `devDependencies` at the
-host's version so those imports typecheck; keep them there (never in
-`dependencies`, which would bundle a second copy), and `bb plugin types`
-repins declared packages alongside the SDK; unused packages may be removed. Ship `dist/` (npm tarball or committed for
-git installs) so people installing your plugin never need npm.
+## Why it is fast
 
-## Manifest
+The built-in page pages through **every task, descriptions included**, and
+does it again on every task or thread change event — which, with agents
+running, arrives in bursts every few seconds. Better Tasks does the opposite:
 
-`package.json` is the plugin manifest. Notable fields:
-
-- `bb.server` — backend entry (required).
-- `bb.app` — frontend entry. Delete it, `app.tsx`, `components/`,
-  `hooks/`, and `lib/` for a headless plugin.
-- `bb.skills` — skill roots; omitted here, so BB reads `skills/`. Each
-  directory with a `SKILL.md` is one skill, named after the directory.
-- `bb.name` and `bb.description` — required human-facing identity.
-- `bb.branding` — required; declare `icon` as a BB icon name or a
-  plugin-relative compact SVG, or declare `logo.light` (with optional
-  `logo.dark`). Logo assets must be relative `.svg`, `.png`, or
-  `.webp` files.
-- `engines.bb` — supported bb app version range.
-- `engines.bbPluginSdk` — the lowest plugin SDK you need (scaffold:
-  `>=0.5.29`). BB reads this as a floor, not a ceiling: a later
-  SDK in the same major still loads your plugin.
-- `dependencies` — every package your source imports that BB does not provide.
-  `bb plugin build` inlines them into `dist/`, and git installs resolve this
-  list alone, so a build-required package here rather than in
-  `devDependencies` is what keeps your plugin installable. `devDependencies`
-  is for types and tooling only (BB shims React, the portal primitives, and
-  `@get-bb/plugin-sdk` at runtime — never bundle them).
-
-Run `bb plugin build` before publishing git/npm installs. It writes
-`dist/server.js` + `server.meta.json` and `app.js` / `app.css` /
-`app.meta.json`. Each `*.meta.json` stamps SDK major/version,
-`artifactFormatVersion`, `pluginId`, `pluginVersion`, and
-`builtWith` so managed installs can verify the artifacts.
-
-## Store listing
-
-Two texts describe the plugin in the store. `bb.description` in package.json
-is the one-sentence hook on every browse card and the lead paragraph on the
-detail page; keep it under about 140 characters. `PLUGIN_OVERVIEW.md` is the
-same claim at length, shown in an Overview section under that paragraph.
-Rewrite the scaffold's copy for your plugin, and update it whenever
-`bb.description` changes, so the two never disagree.
-
-The submission to the public BB Community marketplace requires the file. Keep
-it under 4000 characters (aim for 700 to 1800) and use headings, paragraphs,
-emphasis, code, blockquotes, lists, thematic breaks, and absolute https links
-only — raw HTML, images, tables, footnotes, and task lists are rejected. Do
-not open with a `#` title or repeat `bb.description` verbatim; the page
-shows both directly above.
+1. **A server-side cache without descriptions.** The plugin's server reads the
+   board once through the Tasks RPC — open statuses first, then closed — and
+   keeps each task as a compact row. Descriptions are most of the payload and
+   are fetched only when a task is opened.
+2. **Per-task updates.** The Tasks plugin announces every change with the
+   task's id. The server hears those announcements on bb's own realtime socket
+   (`bb.server.loopbackBaseUrl` + `/ws`), coalesces a burst into one read per
+   task (`getTask`, `listTaskThreads`), and publishes a versioned delta holding
+   only the rows that actually changed. A burst that changes nothing
+   publishes nothing.
+3. **Nothing is refetched wholesale.** The page applies deltas by row
+   revision, so ordering does not matter; if it ever misses one (a reconnect),
+   it pulls just the changes since its version. A full re-read happens only on
+   the server, and only when its feed reconnects.
+4. **Virtualized rendering.** The list and every board column render only the
+   rows on screen. Rows are memoized on the row object, so a delta re-renders
+   exactly the rows it touched.
+5. **Instant revisits.** The board survives navigating away; coming back
+   pulls only what changed.
 
 ## Install
 
-From this directory (`bb plugin new` already ran the install; a fresh clone
-needs it):
-
+```sh
+bb plugin install git:https://github.com/MGrin/bb-plugin-better-tasks
 ```
+
+Or from a checkout:
+
+```sh
+git clone https://github.com/MGrin/bb-plugin-better-tasks
+cd bb-plugin-better-tasks
 npm install
-bb plugin install .
+bb plugin install "path:$PWD"
 ```
 
-After editing sources, reload:
+It appears in the sidebar as **Better Tasks**. It needs the built-in Tasks
+plugin enabled.
 
-```
+## Develop
+
+```sh
+npm install
+npm test            # node --test over test/*.test.ts
+npm run typecheck   # tsc --noEmit
+bb plugin build .   # dist/ bundles
 bb plugin reload better-tasks
 ```
 
-Or let `bb plugin dev` rebuild and reload on every save.
+Tests use synthetic tasks only.
 
-## Configure
+| Path | What it is |
+|---|---|
+| `server.ts` | Plugin server: Tasks RPC adapter, RPC contract, change-feed service |
+| `lib/sync.ts` | Loads the board and applies per-task changes to the cache |
+| `lib/cache.ts` | The versioned row cache and its change log |
+| `lib/feed.ts` | The realtime socket, filtered to Tasks signals, with reconnect |
+| `lib/store.ts` | The page's copy of the board; merges snapshots and deltas by revision |
+| `lib/view.ts` | Filtering, sorting and grouping |
+| `lib/virtual.ts`, `components/virtual-list.tsx` | Windowing |
+| `app.tsx`, `components/` | The page |
 
-```
-bb plugin config better-tasks
-bb plugin config better-tasks set showDone false
-bb plugin reload better-tasks
-```
+## License
 
-## Types & API reference
-
-The plugin API ships as the npm package `@get-bb/plugin-sdk`, pinned to an
-exact version in `devDependencies` (`0.5.29` — the SDK of the BB
-that scaffolded this plugin). After `npm install`, the full surface is on disk
-at:
-
-```
-node_modules/@get-bb/plugin-sdk/bundled-types/bb-plugin-sdk.d.ts      # backend
-node_modules/@get-bb/plugin-sdk/bundled-types/bb-plugin-sdk-app.d.ts  # frontend
-```
-
-Your editor and `tsc` resolve `@get-bb/plugin-sdk` there through ordinary node
-resolution — no path mapping. These are readable declarations: open them for an
-exact signature.
-
-The SDK surface grows with every BB release, so the pin has to track the BB you
-actually run:
-
-```
-bb plugin types          # sync this plugin's SDK surface to the running BB
-bb plugin types --check  # CI: fail when it does not match
-```
-
-Ask BB to write plugins for you: the `bb-plugin-authoring` skill documents
-the whole surface with examples.
-
-Confused by the API, or need something the types don't explain? Clone the BB
-repo and read the source: <https://github.com/get-bb/bb>.
+MIT

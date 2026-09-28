@@ -1,225 +1,266 @@
-// bb-plugin-better-tasks — a BB plugin backend entry.
+// better-tasks — server entry.
 //
-// The default export is a factory that receives the plugin API. BB supplies
-// the tiny defineRpcContract runtime helper; the API type remains type-only.
-//
-// The example is a todo list. One store in bb.storage.kv serves three
-// surfaces: the Example todos page (app.tsx, over RPC), the `bb better-tasks` CLI
-// command (below), and the skill in skills/example-todos/SKILL.md that tells
-// agents how to use that command. A write from any surface publishes a realtime signal so
-// every open page refetches.
-import { randomUUID } from "node:crypto";
+// Holds every task in memory as a compact row (no description), kept current
+// one task at a time from the Tasks plugin's own change signals, and serves
+// the board page over RPC. All reads and writes go through the Tasks
+// plugin's public RPC; nothing here touches its database.
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import type { TaskFields } from "./lib/cache.ts";
+import { feedUrl, runFeed } from "./lib/feed.ts";
+import {
+  PRIORITIES,
+  STATUSES,
+  type Changes,
+  type Label,
+  type Project,
+  type Row,
+  type Status,
+} from "./lib/model.ts";
+import { TaskSync, type TasksApi, type TaskThreadFields } from "./lib/sync.ts";
 
-const todoSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  done: z.boolean(),
-  createdAt: z.string(),
-});
-export type Todo = z.infer<typeof todoSchema>;
+const TASKS_PLUGIN = "tasks";
 
-// Both schemas run at the wire boundary. Handler input/output are inferred
-// from the shared contract; app.tsx imports only its type.
+export interface TaskDetail {
+  task: TaskFields & { description: string };
+  threads: (TaskThreadFields & { attachedAt: string })[];
+  comments: {
+    id: string;
+    kind: "user" | "agent" | "system";
+    authorName: string;
+    body: string;
+    threadId: string | null;
+    createdAt: string;
+  }[];
+  subtasks: string[];
+}
+
+const statusSchema = z.enum(STATUSES);
+const prioritySchema = z.enum(PRIORITIES);
+const taskIdSchema = z.string().min(1).max(64);
+// Rows are produced by this server from validated Tasks plugin output, so the
+// wire schema does not re-validate 5,000 of them on every snapshot.
+const rowsSchema = z.custom<Row[]>();
+const changesSchema = z.custom<Changes>();
+
 export const rpcContract = defineRpcContract({
-  todos_list: {
+  snapshot: {
+    input: z.object({ part: z.enum(["open", "closed", "all"]) }).strict(),
+    output: z.object({
+      version: z.number(),
+      rows: rowsSchema,
+      projects: z.custom<Project[]>(),
+      labels: z.custom<Label[]>(),
+      counts: z.custom<Record<Status, number>>(),
+      complete: z.boolean(),
+    }),
+  },
+  changes: {
+    input: z.object({ since: z.number().int().nonnegative() }).strict(),
+    output: z.object({ changes: changesSchema.nullable() }),
+  },
+  detail: {
+    input: z.object({ taskId: taskIdSchema }).strict(),
+    output: z.object({ detail: z.custom<TaskDetail>().nullable() }),
+  },
+  update: {
+    input: z
+      .object({
+        taskId: taskIdSchema,
+        status: statusSchema.optional(),
+        priority: prioritySchema.optional(),
+      })
+      .strict(),
+    output: z.object({ row: z.custom<Row>().nullable() }),
+  },
+  move: {
+    input: z
+      .object({
+        taskId: taskIdSchema,
+        status: statusSchema,
+        beforeTaskId: taskIdSchema.nullable().optional(),
+        afterTaskId: taskIdSchema.nullable().optional(),
+      })
+      .strict(),
+    output: z.object({ row: z.custom<Row>().nullable() }),
+  },
+  search: {
+    input: z.object({ query: z.string().trim().min(2).max(200) }).strict(),
+    output: z.object({ ids: z.array(z.string()), truncated: z.boolean() }),
+  },
+  stats: {
     input: z.null(),
-    output: z.object({ todos: z.array(todoSchema) }),
-  },
-  todos_add: {
-    input: z.object({ title: z.string().trim().min(1).max(200) }),
-    output: todoSchema,
-  },
-  todos_set_done: {
-    input: z.object({ id: z.string(), done: z.boolean() }),
-    output: todoSchema,
-  },
-  todos_remove: {
-    input: z.object({ id: z.string() }),
-    output: z.object({ removed: z.boolean() }),
+    output: z.custom<Record<string, unknown>>(),
   },
 });
 
-/** Realtime channel app.tsx listens on; the payload is the todo count. */
-const TODOS_CHANGED = "todos-changed";
-
-export default async function plugin(bb: BbPluginApi) {
-  bb.log.info("loaded");
-
-  // Declarative settings — rendered in BB's settings UI and editable with
-  // `bb plugin config better-tasks`. Add `secret: true` for values like API keys.
-  // Settings are read once per load: reload the plugin after changing one.
-  const settings = bb.settings.define({
-    showDone: {
-      type: "boolean",
-      label: "Show completed todos",
-      default: true,
-    },
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
   });
-  const { showDone } = await settings.get();
+}
 
-  // Namespaced key-value storage in bb.db (JSON values, up to 256KB each).
-  // For bigger or relational data use bb.storage.database().
-  async function readTodos(): Promise<Todo[]> {
-    return (await bb.storage.kv.get<Todo[]>("todos")) ?? [];
-  }
-  async function writeTodos(todos: Todo[]): Promise<void> {
-    await bb.storage.kv.set("todos", todos);
-    // Ephemeral broadcast to every connected client; nothing is persisted.
-    bb.realtime.publish(TODOS_CHANGED, { count: todos.length });
+type TaskOrError =
+  | { ok: true; task: TaskFields }
+  | { ok: false; error: { code: string; message: string } };
+
+export default function plugin(bb: BbPluginApi) {
+  async function call<T>(method: string, input: unknown): Promise<T> {
+    return bb.sdk.plugins.callRpc<T>({
+      pluginId: TASKS_PLUGIN,
+      method,
+      input: input as never,
+      // The Tasks plugin validates its own output; do not parse it twice.
+      outputSchema: z.custom<T>(),
+    });
   }
 
-  async function listTodos(): Promise<Todo[]> {
-    const todos = await readTodos();
-    return showDone ? todos : todos.filter((todo) => !todo.done);
-  }
-  async function addTodo(title: string): Promise<Todo> {
-    const todo: Todo = {
-      id: randomUUID().slice(0, 8),
-      title,
-      done: false,
-      createdAt: new Date().toISOString(),
-    };
-    await writeTodos([...(await readTodos()), todo]);
-    return todo;
-  }
-  async function setTodoDone(id: string, done: boolean): Promise<Todo | null> {
-    const todos = await readTodos();
-    const todo = todos.find((candidate) => candidate.id === id);
-    if (todo === undefined) return null;
-    todo.done = done;
-    await writeTodos(todos);
-    return todo;
-  }
-  async function removeTodo(id: string): Promise<boolean> {
-    const todos = await readTodos();
-    const remaining = todos.filter((todo) => todo.id !== id);
-    if (remaining.length === todos.length) return false;
-    await writeTodos(remaining);
-    return true;
+  const api: TasksApi = {
+    listTasks: (input) => call("listTasks", input),
+    getTask: async (taskId) =>
+      (await call<{ task: TaskFields | null }>("getTask", { taskId })).task,
+    listTaskThreads: async (taskId) =>
+      (await call<{ taskThreads: TaskThreadFields[] }>("listTaskThreads", { taskId }))
+        .taskThreads,
+    listProjects: async () =>
+      (await call<{ projects: Project[] }>("listProjects", {})).projects,
+    listLabels: async (projectId) =>
+      (await call<{ labels: Label[] }>("listLabels", { projectId })).labels,
+  };
+
+  const sync = new TaskSync({
+    api,
+    publish: (channel, payload) => bb.realtime.publish(channel, payload),
+    log: (message) => bb.log.warn(message),
+  });
+  bb.onDispose(() => sync.dispose());
+
+  function unwrap(result: TaskOrError): TaskFields {
+    if (!result.ok) throw new Error(result.error.message);
+    return result.task;
   }
 
   bb.rpc.register(rpcContract, {
-    todos_list: async () => ({ todos: await listTodos() }),
-    todos_add: ({ title }) => addTodo(title),
-    todos_set_done: async ({ id, done }) => {
-      const todo = await setTodoDone(id, done);
-      if (todo === null) throw new Error(`No todo with id ${id}`);
-      return todo;
+    async snapshot({ part }) {
+      if (part === "open") await sync.openReady;
+      else await sync.allReady;
+      return {
+        version: sync.cache.version,
+        rows: sync.cache.rows(part),
+        projects: sync.projects,
+        labels: sync.labels,
+        counts: sync.cache.countsByStatus(),
+        complete: sync.loaded,
+      };
     },
-    todos_remove: async ({ id }) => ({ removed: await removeTodo(id) }),
-  });
-
-  // The `bb better-tasks` command: what agents (and you) use from a shell. Parsing
-  // argv is plugin-owned; `commands` is metadata BB renders into help and
-  // the generated plugin-commands skill without running plugin code.
-  const usage = [
-    "Usage:",
-    "  bb better-tasks list [--json]",
-    "  bb better-tasks add <title> [--json]",
-    "  bb better-tasks done <todo-id> [--json]",
-    "  bb better-tasks undo <todo-id> [--json]",
-    "  bb better-tasks remove <todo-id> [--json]",
-  ].join("\n");
-  function formatTodo(todo: Todo): string {
-    return `[${todo.done ? "x" : " "}] ${todo.id}  ${todo.title}`;
-  }
-  bb.cli.register({
-    name: "better-tasks",
-    summary: "Manage the Better Tasks plugin's example todo list",
-    commands: [
-      { name: "list", summary: "List todos", usage: "bb better-tasks list [--json]" },
-      {
-        name: "add",
-        summary: "Add a todo",
-        usage: "bb better-tasks add <title> [--json]",
-      },
-      {
-        name: "done",
-        summary: "Mark a todo done",
-        usage: "bb better-tasks done <todo-id> [--json]",
-      },
-      {
-        name: "undo",
-        summary: "Mark a todo not done",
-        usage: "bb better-tasks undo <todo-id> [--json]",
-      },
-      {
-        name: "remove",
-        summary: "Remove a todo",
-        usage: "bb better-tasks remove <todo-id> [--json]",
-      },
-    ],
-    async run(argv) {
-      const json = argv.includes("--json");
-      const [command, ...args] = argv.filter((arg) => arg !== "--json");
-      const reply = (value: unknown, text: string) => ({
-        exitCode: 0,
-        stdout: json ? JSON.stringify(value) : text,
-      });
-      const notFound = (missingId: string) => ({
-        exitCode: 1,
-        stderr: `No todo with id ${missingId}. Run "bb better-tasks list" to see ids.`,
-      });
-      const todoId = args[0];
-      switch (command) {
-        case undefined:
-        case "help":
-        case "--help":
-          return { exitCode: 0, stdout: usage };
-        case "list": {
-          const todos = await listTodos();
-          return reply(
-            todos,
-            todos.length === 0 ? "No todos." : todos.map(formatTodo).join("\n"),
-          );
-        }
-        case "add": {
-          const title = args.join(" ").trim();
-          if (title === "") break;
-          const todo = await addTodo(title);
-          return reply(todo, `Added ${formatTodo(todo)}`);
-        }
-        case "done":
-        case "undo": {
-          if (todoId === undefined || args.length !== 1) break;
-          const todo = await setTodoDone(todoId, command === "done");
-          if (todo === null) return notFound(todoId);
-          return reply(todo, formatTodo(todo));
-        }
-        case "remove": {
-          if (todoId === undefined || args.length !== 1) break;
-          if (!(await removeTodo(todoId))) return notFound(todoId);
-          return reply({ removed: true, id: todoId }, `Removed ${todoId}`);
-        }
-      }
-      return { exitCode: 1, stderr: usage };
+    changes({ since }) {
+      return { changes: sync.changesSince(since) };
+    },
+    async detail({ taskId }) {
+      const task = await call<{ task: TaskDetail["task"] | null }>("getTask", { taskId });
+      if (task.task === null) return { detail: null };
+      const [threads, comments, subtasks] = await Promise.all([
+        call<{ taskThreads: TaskDetail["threads"] }>("listTaskThreads", { taskId }),
+        call<{ comments: TaskDetail["comments"] }>("listComments", { taskId }),
+        call<{ tasks: TaskFields[] }>("listTasks", { parentTaskId: taskId, limit: 500 }),
+      ]);
+      return {
+        detail: {
+          task: task.task,
+          threads: threads.taskThreads,
+          comments: comments.comments.map(
+            ({ id, kind, authorName, body, threadId, createdAt }) => ({
+              id,
+              kind,
+              authorName,
+              body,
+              threadId,
+              createdAt,
+            }),
+          ),
+          subtasks: subtasks.tasks.map((subtask) => subtask.id),
+        },
+      };
+    },
+    async update({ taskId, status, priority }) {
+      const task = unwrap(
+        await call<TaskOrError>("updateTask", {
+          taskId,
+          ...(status === undefined ? {} : { status }),
+          ...(priority === undefined ? {} : { priority }),
+        }),
+      );
+      sync.applyTask(task);
+      return { row: sync.cache.get(task.id) ?? null };
+    },
+    async move({ taskId, status, beforeTaskId, afterTaskId }) {
+      const task = unwrap(
+        await call<TaskOrError>("boardMove", {
+          taskId,
+          status,
+          ...(beforeTaskId === undefined ? {} : { beforeTaskId }),
+          ...(afterTaskId === undefined ? {} : { afterTaskId }),
+        }),
+      );
+      sync.applyTask(task);
+      return { row: sync.cache.get(task.id) ?? null };
+    },
+    async search({ query }) {
+      const limit = 500;
+      const page = await call<{ tasks: TaskFields[]; nextCursor: string | null }>(
+        "listTasks",
+        { search: query, limit },
+      );
+      return {
+        ids: page.tasks.map((task) => task.id),
+        truncated: page.nextCursor !== null,
+      };
+    },
+    stats() {
+      return {
+        version: sync.cache.version,
+        size: sync.cache.size,
+        loaded: sync.loaded,
+        ...sync.stats,
+      };
     },
   });
 
-  // Cleanup on reload/disable/shutdown; hooks run LIFO. The sanctioned place
-  // to clear timers and close connections.
-  bb.onDispose(() => {
-    bb.log.info("disposed");
+  // Load once, then keep current from the Tasks plugin's own signals.
+  bb.background.service("change-feed", {
+    async start(signal) {
+      // A failed load (the Tasks plugin busy, restarting) retries with
+      // backoff rather than leaving the board half-read.
+      const load = async () => {
+        for (let attempt = 0; !signal.aborted; attempt += 1) {
+          try {
+            await sync.requestFullLoad();
+            return;
+          } catch (error) {
+            sync.stats.failedLoads += 1;
+            const delay = Math.min(30_000, 1_000 * 2 ** attempt);
+            bb.log.error(`full load failed, retrying in ${delay} ms: ${String(error)}`);
+            await sleep(delay, signal);
+          }
+        }
+      };
+      await runFeed(
+        feedUrl(bb.server.loopbackBaseUrl),
+        {
+          onSignal: (channel, payload) => sync.onSignal(channel, payload),
+          // First connect: the initial load. A reconnect: signals may have
+          // been missed while the socket was down, so diff everything once.
+          onOpen: () => void load(),
+          log: (message) => bb.log.info(message),
+        },
+        signal,
+      );
+    },
   });
-
-  // Long-lived background work: starts after load, gets an AbortSignal on
-  // reload/disable/shutdown, and restarts with backoff if it crashes. Sleeps
-  // must wake on abort — a plain setTimeout sleeps through the stop window
-  // and the plugin reports "degraded (service did not stop)" on reload.
-  // bb.background.service("worker", {
-  //   async start(signal) {
-  //     while (!signal.aborted) {
-  //       await new Promise((resolve) => {
-  //         const timer = setTimeout(resolve, 60_000);
-  //         signal.addEventListener(
-  //           "abort",
-  //           () => { clearTimeout(timer); resolve(undefined); },
-  //           { once: true },
-  //         );
-  //       });
-  //     }
-  //   },
-  // });
 }

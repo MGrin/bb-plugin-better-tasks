@@ -92,7 +92,7 @@ const SHORTCUTS: [string, string][] = [
   ["Esc", "Close task / clear selection"],
   ["/", "Search"],
   ["v", "Switch list / board"],
-  ["1 – 6", "Set status: backlog, todo, in progress, in review, done, canceled"],
+  ["1 – 6", "Set status: backlog, todo, in progress, in review, done, cancelled"],
   ["⇧1 – ⇧5", "Set priority: urgent, high, medium, low, none"],
   ["?", "This help"],
 ];

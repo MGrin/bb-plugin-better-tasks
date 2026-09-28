@@ -1,21 +1,22 @@
 // Types and constants shared by server.ts and app.tsx. Pure data, no runtime
 // dependencies, so both bundles can import it.
 
+/** One order for list groups and board columns (mgrin, 2026-09-28). */
 export const STATUSES = [
+  "backlog",
+  "todo",
   "in_progress",
   "in_review",
-  "todo",
-  "backlog",
   "done",
   "canceled",
 ] as const;
 export type Status = (typeof STATUSES)[number];
 
 export const OPEN_STATUSES: readonly Status[] = [
+  "backlog",
+  "todo",
   "in_progress",
   "in_review",
-  "todo",
-  "backlog",
 ];
 export const CLOSED_STATUSES: readonly Status[] = ["done", "canceled"];
 
@@ -28,7 +29,7 @@ export const STATUS_LABEL: Record<Status, string> = {
   todo: "Todo",
   backlog: "Backlog",
   done: "Done",
-  canceled: "Canceled",
+  canceled: "Cancelled",
 };
 
 export const PRIORITY_LABEL: Record<Priority, string> = {

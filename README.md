@@ -37,7 +37,7 @@ and both pages show the same board.
 | `Esc` | Close task, then clear selection |
 | `/` | Search |
 | `v` | Switch list / board |
-| `1`–`6` | Status: backlog, todo, in progress, in review, done, canceled |
+| `1`–`6` | Status: backlog, todo, in progress, in review, done, cancelled |
 | `⇧1`–`⇧5` | Priority: urgent, high, medium, low, none |
 | `?` | Shortcut help |
 

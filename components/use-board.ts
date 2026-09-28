@@ -8,7 +8,7 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../server";
 import type { DeltaSignal, Label, Project } from "@/lib/model";
-import { ClientStore } from "@/lib/store";
+import { ClientStore, type Snapshot } from "@/lib/store";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
 
@@ -23,6 +23,7 @@ export interface BoardMetrics {
   pulls: number;
   snapshots: number;
   lastDeltaAt: number | null;
+  prefetched: boolean;
 }
 
 // Module scope: navigating away and back keeps the board, so a revisit is
@@ -38,10 +39,33 @@ const metrics: BoardMetrics = {
   pulls: 0,
   snapshots: 0,
   lastDeltaAt: null,
+  prefetched: false,
 };
 let loading: Promise<void> | null = null;
 let error: string | null = null;
 (globalThis as { __betterTasks?: unknown }).__betterTasks = metrics;
+
+let prefetched: Promise<Snapshot> | null = null;
+
+/**
+ * Fetch open work as soon as bb loads this bundle (it does at boot, to
+ * register the sidebar entry), so opening the page finds it ready. Stale by
+ * the time it is used, so the page pulls changes right after applying it.
+ */
+export function prefetchOpenWork(pluginId: string): void {
+  if (prefetched !== null || store.version >= 0 || typeof fetch !== "function") return;
+  prefetched = fetch(`/api/v1/plugins/${encodeURIComponent(pluginId)}/rpc/snapshot`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ part: "open" }),
+  })
+    .then((response) => response.json() as Promise<{ ok: boolean; result: Snapshot }>)
+    .then((body) => {
+      if (!body.ok) throw new Error("prefetch failed");
+      return body.result;
+    });
+  prefetched.catch(() => {});
+}
 
 function idle(): Promise<void> {
   return new Promise((resolve) => {
@@ -52,11 +76,17 @@ function idle(): Promise<void> {
 
 async function load(rpc: Rpc): Promise<void> {
   metrics.startedAt = performance.now();
-  const open = await rpc.call("snapshot", { part: "open" });
+  const early = prefetched;
+  prefetched = null;
+  const open = early === null ? null : await early.catch(() => null);
+  const fresh = open ?? (await rpc.call("snapshot", { part: "open" }));
   metrics.snapshots += 1;
-  store.applySnapshot(open, "open");
+  store.applySnapshot(fresh, "open");
   metrics.openRowsAt = performance.now();
-  metrics.openRows = open.rows.length;
+  metrics.openRows = fresh.rows.length;
+  metrics.prefetched = open !== null;
+  // A prefetched snapshot may be minutes old: catch up before anything else.
+  if (open !== null) await pull(rpc);
   // Closed work is 93% of the board; fetch it once the open view is up.
   await idle();
   const closed = await rpc.call("snapshot", { part: "closed" });

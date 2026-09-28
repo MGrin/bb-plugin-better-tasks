@@ -20,7 +20,7 @@ import {
   type BoardLookup,
 } from "@/components/task-items";
 import { Toolbar, type ViewMode } from "@/components/toolbar";
-import { useBoard } from "@/components/use-board";
+import { prefetchOpenWork, useBoard } from "@/components/use-board";
 import { BoardView, ListView } from "@/components/views";
 import {
   CLOSED_STATUSES,
@@ -529,6 +529,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
 }
 
 export default definePluginApp((app) => {
+  prefetchOpenWork("better-tasks");
   app.slots.navPanel({
     id: "board",
     title: "Better Tasks",

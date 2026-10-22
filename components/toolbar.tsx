@@ -78,7 +78,16 @@ function Menu({
           {trigger}
         </ToolbarButton>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} className="max-h-[70vh] min-w-56 overflow-y-auto">
+      {/* The toolbar is the top of the board, so there is never more room above it. Radix's
+          collision flip still opened the projects list upward on an iPad, clipping its top
+          off-screen. Always open downward, capped to the room left below, scrolling inside. */}
+      <DropdownMenuContent
+        align={align}
+        side="bottom"
+        avoidCollisions={false}
+        collisionPadding={8}
+        className="max-h-[min(70vh,var(--radix-dropdown-menu-content-available-height,70vh))] min-w-56 overflow-y-auto"
+      >
         {children}
       </DropdownMenuContent>
     </DropdownMenu>

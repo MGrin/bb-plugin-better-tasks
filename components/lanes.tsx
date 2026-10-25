@@ -15,6 +15,9 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { LaneImport } from "./lane-import";
 import { laneSelectClass } from "./lane-picker";
+import { Menu } from "./toolbar-menu";
+import { Icon } from "./ui/icon";
+import { DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuSeparator } from "./ui/dropdown-menu";
 import type { LanesController } from "./use-lanes";
 import type { Lane, LaneOwner } from "../lib/lanes/model";
 import {
@@ -26,6 +29,68 @@ import {
 } from "../lib/model";
 import type { Filters } from "../lib/view";
 
+export function LaneFilter({ controller, filters, onFilters, onManage }: {
+  controller: LanesController;
+  filters: Filters;
+  onFilters: (filters: Filters) => void;
+  onManage: () => void;
+}) {
+  const { store, error } = controller;
+  const lanes = [...store.lanes.values()].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  const missing = filters.laneIds.filter(id => !store.lanes.has(id));
+  const count = filters.laneIds.length;
+  const selected = count === 1 ? store.lanes.get(filters.laneIds[0]!) : undefined;
+  const scope = count === 0 ? (filters.noLane ? "No lane" : "All lanes")
+    : `${count === 1 ? selected?.name ?? "Unavailable lane" : `${count} lanes`}${filters.noLane ? " + No lane" : ""}`;
+  const set = (patch: Partial<Filters>) => onFilters({ ...filters, ...patch });
+  const toggleLane = (id: string) => set({ laneIds: filters.laneIds.includes(id)
+    ? filters.laneIds.filter(value => value !== id) : [...filters.laneIds, id] });
+  const keepOpen = (event: Event) => event.preventDefault();
+  return (
+    <Menu label="Lanes" active={count > 0 || filters.noLane} trigger={<>
+      <Icon name="Layers" className="size-3.5" />
+      <span className="max-w-40 truncate font-medium text-foreground @max-[640px]/bar:max-w-28" title={scope}>{scope}</span>
+      <Icon name="ChevronDown" className="size-3 opacity-60" />
+    </>}>
+      <DropdownMenuCheckboxItem checked={count === 0 && !filters.noLane}
+        onCheckedChange={() => set({ laneIds: [], noLane: false })} onSelect={keepOpen}>
+        All lanes
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuCheckboxItem checked={filters.noLane}
+        onCheckedChange={() => set({ noLane: !filters.noLane })} onSelect={keepOpen}>
+        No lane
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuSeparator />
+      {error ? <>
+        <p role="alert" className="max-w-72 break-words px-2 py-1 text-xs text-destructive">Could not load lanes: {error}</p>
+        <DropdownMenuItem onSelect={event => { event.preventDefault(); void controller.refresh().catch(() => {}); }}>Retry lanes</DropdownMenuItem>
+      </> : store.version < 0 ? <p role="status" className="px-2 py-1 text-xs text-muted-foreground">Loading lanes…</p>
+        : lanes.length === 0 ? <p className="px-2 py-1 text-xs text-muted-foreground">No lanes yet.</p> : null}
+      {lanes.map(lane => {
+        const duplicates = lanes.filter(other => other.name === lane.name);
+        // Use only enough of the ID to distinguish genuinely duplicated names.
+        const suffix = duplicates.length > 1 ? lane.id.slice(0, Math.max(8, ...duplicates.filter(other => other.id !== lane.id).map(other => {
+          let length = 1;
+          while (length < lane.id.length && other.id.slice(0, length) === lane.id.slice(0, length)) length++;
+          return length;
+        }))) : "";
+        return <DropdownMenuCheckboxItem key={lane.id} checked={filters.laneIds.includes(lane.id)}
+          textValue={lane.name} onCheckedChange={() => toggleLane(lane.id)} onSelect={keepOpen}>
+          <span className="min-w-0 flex-1 truncate" title={lane.name}>{lane.name}</span>
+          {suffix ? <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{suffix}</span> : null}
+          <span className="shrink-0 text-[11px] text-muted-foreground">{lane.state}</span>
+        </DropdownMenuCheckboxItem>;
+      })}
+      {missing.map((id, index) => <DropdownMenuCheckboxItem key={id} checked onCheckedChange={() => toggleLane(id)} onSelect={keepOpen}>
+        <span className="min-w-0 flex-1 truncate">Unavailable lane{missing.length > 1 ? ` ${index + 1}` : ""}</span>
+        <span className="shrink-0 text-[11px] text-muted-foreground">selected</span>
+      </DropdownMenuCheckboxItem>)}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={onManage}>Manage lanes</DropdownMenuItem>
+    </Menu>
+  );
+}
+
 export function LaneNavigation({
   controller,
   filters,
@@ -34,7 +99,11 @@ export function LaneNavigation({
   complete,
   labels,
   projects,
+  open,
+  onOpenChange,
 }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   labels: readonly Label[];
   projects: readonly Project[];
   controller: LanesController;
@@ -43,57 +112,14 @@ export function LaneNavigation({
   rows: ReadonlyMap<string, Row>;
   complete: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const [importing, setImporting] = useState(false);
-  const { store, error } = controller;
-  const lanes = [...store.lanes.values()].sort(
-    (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
-  );
+  const { store } = controller;
   const selected =
-    filters.laneIds.length === 1
+    filters.laneIds.length === 1 && !filters.noLane
       ? store.lanes.get(filters.laneIds[0]!)
       : undefined;
   return (
     <>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-          Lanes
-        </Button>
-        <label className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          Lane
-          <select
-            className={laneSelectClass + " min-w-0 max-w-64"}
-            aria-label="Lane filter"
-            value={filters.noLane ? "none" : (filters.laneIds[0] ?? "all")}
-            onChange={(e) =>
-              onFilters({
-                ...filters,
-                laneIds:
-                  e.target.value === "all" || e.target.value === "none"
-                    ? []
-                    : [e.target.value],
-                noLane: e.target.value === "none",
-              })
-            }
-          >
-            <option value="all">All lanes</option>
-            <option value="none">No lane</option>
-            {lanes.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name} · {l.id.slice(0, 8)} ({l.state})
-              </option>
-            ))}
-          </select>
-        </label>
-        {error ? (
-          <span role="alert" className="text-xs text-destructive">
-            Could not load lanes: {error}{" "}
-            <button onClick={() => void controller.refresh().catch(() => {})}>
-              Retry
-            </button>
-          </span>
-        ) : null}
-      </div>
       {selected ? (
         <LaneSummary
           lane={selected}
@@ -102,12 +128,12 @@ export function LaneNavigation({
           complete={complete}
         />
       ) : null}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="flex max-h-[90dvh] w-[calc(100%-2rem)] max-w-3xl flex-col overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center justify-between gap-2">
               <DialogTitle>Goal lanes</DialogTitle>
-              <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
                 Close lanes
               </Button>
             </div>
@@ -137,7 +163,7 @@ export function LaneNavigation({
               onImport={() => setImporting(true)}
               onSelect={(id) => {
                 onFilters({ ...filters, laneIds: [id], noLane: false });
-                setOpen(false);
+                onOpenChange(false);
               }}
             />
           )}

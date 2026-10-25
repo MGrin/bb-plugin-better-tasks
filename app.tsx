@@ -43,7 +43,7 @@ import {
 } from "@/lib/view";
 
 import { useLanes } from "./components/use-lanes";
-import { LaneNavigation } from "./components/lanes";
+import { LaneFilter, LaneNavigation } from "./components/lanes";
 import { LanePicker } from "./components/lane-picker";
 
 const PANEL_PATH = "board";
@@ -110,6 +110,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
   const { rpc, store, revision, metrics, error, retry } = useBoard();
   const lanes = useLanes();
   const [ui, setUi] = useState<UiState>(() => readUi(storageKey));
+  const [lanesOpen, setLanesOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [descriptionHits, setDescriptionHits] = useState<ReadonlySet<string> | null>(null);
@@ -415,6 +416,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
       <LookupContext.Provider value={lookup}>
         <div className="flex h-full min-h-0 flex-1 flex-col bg-background" data-better-tasks-view={view}>
           <Toolbar
+            laneFilter={<LaneFilter controller={lanes} filters={filters} onFilters={setFilters} onManage={() => setLanesOpen(true)} />}
             ref={searchRef}
             filters={filters}
             onFilters={setFilters}
@@ -435,7 +437,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
             }
             onHelp={() => setHelpOpen(true)}
           />
-          <LaneNavigation labels={store.labels} projects={store.projects} controller={lanes} filters={filters} onFilters={setFilters} rows={store.rows} complete={store.closedLoaded}/>
+          <LaneNavigation open={lanesOpen} onOpenChange={setLanesOpen} labels={store.labels} projects={store.projects} controller={lanes} filters={filters} onFilters={setFilters} rows={store.rows} complete={store.closedLoaded}/>
           <div className="@container/body flex min-h-0 flex-1">
             <main
               className={cn("@container/list flex min-w-0 flex-1 flex-col", detailOpen && "@max-[720px]/body:hidden")}

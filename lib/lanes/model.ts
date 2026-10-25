@@ -6,3 +6,11 @@ export type WriteResult<T> = {ok:true; value:T} | {ok:false; code:"conflict"; cu
 export type LaneEvent = {version:number; kind:"lane"; value:Lane} | {version:number;kind:"membership";value:LaneMembership};
 export interface LaneSnapshot { version:number; lanes:Lane[]; memberships:LaneMembership[] }
 export interface LaneChanges { from:number; to:number; events:LaneEvent[] }
+export interface LaneOwner { id:string; status:"available"|"archived"|"missing"|"unknown"; title:string|null }
+export type LaneReply =
+  | {kind:"list";lanes:Lane[];nextCursor:string|null}
+  | {kind:"detail";lane:Lane|null;owner:LaneOwner|null;memberships:LaneMembership[];nextCursor:string|null}
+  | {kind:"create";lane:Lane}
+  | {kind:"update";result:WriteResult<Lane>}
+  | {kind:"assign";result:WriteResult<LaneMembership>}
+  | {kind:"owner";owner:LaneOwner};

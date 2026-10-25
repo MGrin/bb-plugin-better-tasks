@@ -19,6 +19,8 @@ import {
 } from "./lib/model.ts";
 import { TaskSync, type TasksApi, type TaskThreadFields } from "./lib/sync.ts";
 
+import { laneBackend, laneRpcMethods } from "./lib/lanes/backend.ts";
+
 const TASKS_PLUGIN = "tasks";
 
 export interface TaskDetail {
@@ -44,6 +46,7 @@ const rowsSchema = z.custom<Row[]>();
 const changesSchema = z.custom<Changes>();
 
 export const rpcContract = defineRpcContract({
+  ...laneRpcMethods,
   snapshot: {
     input: z.object({ part: z.enum(["open", "closed", "all"]) }).strict(),
     output: z.object({
@@ -150,7 +153,20 @@ export default function plugin(bb: BbPluginApi) {
     return result.task;
   }
 
+  const laneHandlers=laneBackend(bb,{
+    getTask:api.getTask,
+    async getOwner(id){
+      try {
+        const thread=await bb.sdk.threads.get({threadId:id});
+        return {id,status:thread.deletedAt!==null?"missing" as const:thread.archivedAt!==null?"archived" as const:"available" as const,title:thread.title};
+      } catch(error) {
+        const missing=typeof error==="object" && error!==null && "status" in error && error.status===404;
+        return {id,status:missing?"missing" as const:"unknown" as const,title:null};
+      }
+    },
+  });
   bb.rpc.register(rpcContract, {
+    ...laneHandlers,
     async snapshot({ part }) {
       if (part === "open") await sync.openReady;
       else await sync.allReady;

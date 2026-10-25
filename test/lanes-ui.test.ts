@@ -64,7 +64,20 @@ test("people create, rename, park, archive and restore a lane through accessible
   const { loadPluginApp, renderSlot } =
     await import("@get-bb/plugin-sdk/testing/app");
   const { default: plugin } = await import("../server.ts");
-  const { harness, bb } = createFakePluginHost();
+  let archivedOwner = false;
+  const { makeThreadResponse } = await import("@get-bb/plugin-sdk/testing");
+  const { harness, bb } = createFakePluginHost({
+    sdk: {
+      threads: {
+        get: async () =>
+          makeThreadResponse({
+            id: "operator",
+            title: "Operator",
+            archivedAt: archivedOwner ? 123 : null,
+          }),
+      },
+    },
+  });
   plugin(bb);
   const row = { ...task({ id: "demo" }), rev: 1, live: [] };
   const coreSnapshot = {
@@ -118,6 +131,60 @@ test("people create, rename, park, archive and restore a lane through accessible
   await user.click(screen.getByRole("button", { name: "Save lane" }));
   await waitFor(() =>
     assert.ok(screen.getByRole("button", { name: "Edit lane Renamed goal" })),
+  );
+  const beforeRestore: any = await harness.behavior.callRpc(
+    "laneSnapshot",
+    null,
+  );
+  const restoredLane = {
+    ...beforeRestore.lanes[0],
+    goal: "Restored backup goal",
+  };
+  bb.storage
+    .database()
+    .prepare("UPDATE lanes SET data=? WHERE id=?")
+    .run(JSON.stringify(restoredLane), restoredLane.id);
+  await slot.behavior.setRealtimeConnectionState("reconnecting");
+  await slot.behavior.setRealtimeConnectionState("connected");
+  await waitFor(() =>
+    assert.match(
+      screen.getByRole("button", { name: "Edit lane Renamed goal" })
+        .textContent ?? "",
+      /Restored backup goal/,
+    ),
+  );
+  await user.click(screen.getByRole("button", { name: "Reload lane" }));
+  await waitFor(() =>
+    assert.equal(
+      (screen.getByLabelText("Goal") as HTMLTextAreaElement).value,
+      "Restored backup goal",
+    ),
+  );
+  const existing: any = await harness.behavior.callRpc("lane", { op: "list" });
+  await harness.behavior.callRpc("lane", {
+    op: "update",
+    id: existing.lanes[0].id,
+    expectedRevision: existing.lanes[0].revision,
+    patch: { ownerThreadId: "operator" },
+  });
+  await slot.behavior.emitRealtime("lanes", { version: 3 });
+  await user.click(screen.getByRole("button", { name: "Reload lane" }));
+  await waitFor(() =>
+    assert.match(
+      screen.getByRole("button", { name: "Operator" }).parentElement
+        ?.textContent ?? "",
+      /available/,
+    ),
+  );
+  archivedOwner = true;
+  await slot.behavior.setRealtimeConnectionState("reconnecting");
+  await slot.behavior.setRealtimeConnectionState("connected");
+  await waitFor(() =>
+    assert.match(
+      screen.getByRole("button", { name: "Operator" }).parentElement
+        ?.textContent ?? "",
+      /archived/,
+    ),
   );
   const saved: any = await harness.behavior.callRpc("lane", { op: "list" });
   const changedLane = saved.lanes[0];

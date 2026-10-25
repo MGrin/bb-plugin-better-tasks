@@ -22,6 +22,8 @@ export function useLanes() {
   const connection = useRealtimeConnectionState();
   const pulling = useRef<Promise<void> | null>(null);
   const again = useRef(false);
+  const full = useRef(false);
+  const previousConnection = useRef(connection);
   const mounted = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -32,9 +34,10 @@ export function useLanes() {
     pulling.current = (async () => {
       do {
         again.current = false;
-        if (store.version < 0)
-          store.snapshot(await rpc.call("laneSnapshot", null));
-        else {
+        if (store.version < 0 || full.current) {
+          full.current = false;
+          store.snapshot(await rpc.call("laneSnapshot", null), true);
+        } else {
           const { changes } = await rpc.call("laneChanges", {
             since: store.version,
           });
@@ -64,6 +67,12 @@ export function useLanes() {
     };
   }, []);
   useEffect(() => {
+    if (
+      previousConnection.current !== "connected" &&
+      connection === "connected"
+    )
+      full.current = true;
+    previousConnection.current = connection;
     void refresh().catch(() => {});
   }, [connection, refresh]);
   useRealtime("lanes", () => {

@@ -165,3 +165,26 @@ test("lane import RPC and CLI share reviewed receipt and preserve source labels"
   );
   await harness.lifecycle.dispose();
 });
+test("owner lifecycle invalidations only publish for lanes that reference the thread", async () => {
+  const { harness } = host();
+  await harness.behavior.callRpc("lane", {
+    op: "create",
+    name: "A",
+    ownerThreadId: "owner",
+  });
+  await harness.behavior.emitThreadEvent("thread.archived", {
+    thread: makeThreadResponse({ id: "unrelated", archivedAt: 123 }),
+  });
+  assert.equal(
+    harness.realtimeSignals.filter((s) => s.channel === "lane-owners").length,
+    0,
+  );
+  await harness.behavior.emitThreadEvent("thread.archived", {
+    thread: makeThreadResponse({ id: "owner", archivedAt: 123 }),
+  });
+  assert.equal(
+    harness.realtimeSignals.filter((s) => s.channel === "lane-owners").length,
+    1,
+  );
+  await harness.lifecycle.dispose();
+});

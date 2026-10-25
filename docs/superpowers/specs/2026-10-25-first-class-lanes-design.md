@@ -65,4 +65,4 @@ Deliver one coherent implementation PR in this repository, with design and opera
 
 ## Review
 
-A read-only architecture review confirmed the current cache/RPC shape and supported plugin-local SQLite storage in running BB0.47.1. It found the central choices to be lifecycle/owner metadata and one-lane-per-task semantics. Both are authorized defaults above. No product code, dependencies, or live plugin state have changed.
+A read-only architecture review confirmed the current cache/RPC shape and supported plugin-local SQLite storage in running BB0.47.1. It found the central choices to be lifecycle/owner metadata and one-lane-per-task semantics. Both are authorized defaults above. That review preceded implementation. The approved plan now governs the feature branch; live installation and live-data import remain separate integration steps.

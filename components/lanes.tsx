@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useBbNavigate } from "@get-bb/plugin-sdk/app";
+import {
+  useBbNavigate,
+  useRealtime,
+  useRealtimeConnectionState,
+} from "@get-bb/plugin-sdk/app";
 import {
   Dialog,
   DialogContent,
@@ -180,6 +184,12 @@ function Owner({
   controller: LanesController;
 }) {
   const [owner, setOwner] = useState<LaneOwner | null>(null);
+  const connection = useRealtimeConnectionState();
+  const [ownerRevision, setOwnerRevision] = useState(0);
+  useRealtime("lane-owners", (payload) => {
+    if ((payload as { threadId?: string }).threadId === id)
+      setOwnerRevision((v) => v + 1);
+  });
   const navigate = useBbNavigate();
   useEffect(() => {
     let live = true;
@@ -196,7 +206,7 @@ function Owner({
     return () => {
       live = false;
     };
-  }, [id, controller.rpc]);
+  }, [id, controller.rpc, controller.revision, connection, ownerRevision]);
   if (!id) return <span>No operator</span>;
   return (
     <span className="break-all">

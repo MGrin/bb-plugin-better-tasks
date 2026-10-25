@@ -135,7 +135,9 @@ Typed RPC methods are `lane` (validated operation union), `laneSnapshot`,
 `laneChanges`, `laneImportPreview`, and `laneImportApply`. See
 [contracts](lib/lanes/contract.ts) and [import inputs](lib/lanes/import-model.ts).
 The independent `lanes` realtime channel carries its persisted version; clients
-pull bounded deltas or reset to a lane snapshot after falling behind. Lane-only
+pull bounded deltas or reset to a lane snapshot after falling behind. Every
+reconnect takes an authoritative lane snapshot so restored backups with reused
+version numbers cannot leave stale lane data visible. Lane-only
 edits do not reload the task board or its descriptions.
 
 ### Importing existing lane labels
@@ -172,7 +174,9 @@ Before an authorized upgrade/uninstall, take a consistent SQLite backup of
 `<BB data dir>/plugins/better-tasks/data.db` using SQLite's backup facility.
 A raw copy of only the database while WAL writes run may omit committed data.
 Retain the backup outside the plugin directory; verify its integrity and test
-restoration in an isolated installation. Plugin removal/data deletion may erase
+restoration in an isolated installation. Stop the plugin and close its pages
+before restoring a backup; reopen them afterward to discard pre-restore edit
+revisions. Plugin removal/data deletion may erase
 lanes and receipts while leaving core tasks intact.
 
 Integration belongs to the installation owner: review/merge the tested head,

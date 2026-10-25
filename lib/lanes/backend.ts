@@ -44,6 +44,17 @@ export function laneBackend(
     bb.realtime.publish("lanes", { version }),
   );
   bb.cli.register(laneCli(service, importer));
+  // These observe-only listeners are disposed by the host with this generation.
+  for (const event of [
+    "thread.archived",
+    "thread.unarchived",
+    "thread.deleted",
+  ] as const) {
+    bb.events.on(event, ({ thread }) => {
+      if (repo.list().some((l) => l.ownerThreadId === thread.id))
+        bb.realtime.publish("lane-owners", { threadId: thread.id });
+    });
+  }
   return {
     laneImportPreview: (input: unknown) => importer.preview(input),
     laneImportApply: (input: unknown) => importer.apply(input),

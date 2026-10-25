@@ -6,7 +6,14 @@ import type { LaneImporter } from "./import.ts";
 export function laneCli(service: LaneService, importer: LaneImporter) {
   function command(op: string) {
     return cliCommand({
-      summary: `Lane ${op}. Input is a JSON object; writes require expectedRevision.`,
+      summary:
+        op === "observe"
+          ? "Coherent local observation: {taskId,destinationLaneId} (required nullable destination). No reservation or permission."
+          : op === "transfer"
+            ? "Attributable local CAS: persist caller UUID and exact {operationId,taskId,laneId,expected} before send; retry unchanged. Conflict exits 1 with receipt JSON."
+            : op === "operation"
+              ? "Immutable receipt lookup: {operationId}. not_found is an observation, not cancellation; preserve the same request ID."
+              : `Lane ${op}. Input is a JSON object; writes require expectedRevision.`,
       options: {
         input: {
           type: "string",
@@ -31,7 +38,9 @@ export function laneCli(service: LaneService, importer: LaneImporter) {
         if (op === "unassign")
           request = { ...data, op: "assign", laneId: null };
         const result = await service.execute(request);
-        const conflict = "result" in result && !result.result.ok;
+        const conflict =
+          ("result" in result && !result.result.ok) ||
+          (result.kind === "transfer" && result.receipt.outcome === "conflict");
         return {
           exitCode: conflict ? 1 : 0,
           stdout: JSON.stringify(result) + "\n",
@@ -89,6 +98,9 @@ export function laneCli(service: LaneService, importer: LaneImporter) {
         },
       }),
       "lane membership": command("membership"),
+      "lane observe": command("observe"),
+      "lane transfer": command("transfer"),
+      "lane operation": command("operation"),
       "lane list": command("list"),
       "lane get": command("get"),
       "lane create": command("create"),

@@ -1,7 +1,11 @@
 import type { LaneRepository } from "./repository.ts";
 import type { LaneOwner, LaneReply } from "./model.ts";
 import { z } from "zod";
-import { laneInputSchema } from "./contract.ts";
+import {
+  laneInputSchema,
+  canonicalTransfer,
+  LaneProtocolError,
+} from "./contract.ts";
 export interface LaneAdapters {
   getTask: (id: string) => Promise<unknown | null>;
   getOwner: (id: string) => Promise<LaneOwner>;
@@ -22,12 +26,63 @@ export class LaneService {
 
   async execute(raw: unknown): Promise<LaneReply> {
     const input = laneInputSchema.parse(raw);
+    // These paths own their publication decision. A global clock delta across await
+    // can belong to an unrelated writer and must never publish for a read or replay.
+    if (input.op === "observe")
+      return {
+        kind: "observation",
+        observation: this.r.observe(input.taskId, input.destinationLaneId),
+      };
+    if (input.op === "operation") {
+      const receipt = this.r.operation(input.operationId);
+      return receipt
+        ? {
+            kind: "operation",
+            operationId: input.operationId,
+            status: "found",
+            receipt,
+          }
+        : {
+            kind: "operation",
+            operationId: input.operationId,
+            status: "not_found",
+          };
+    }
+    if (input.op === "transfer") {
+      const request = canonicalTransfer(input);
+      const prior = this.r.replay(request);
+      if (prior) return { kind: "transfer", receipt: prior };
+      let failure: LaneProtocolError | null = null;
+      if (input.laneId !== null) {
+        try {
+          const task = await this.a.getTask(input.taskId);
+          if (task === null) failure = new LaneProtocolError("task_missing");
+          else if (
+            !task ||
+            typeof task !== "object" ||
+            !("id" in task) ||
+            task.id !== input.taskId
+          )
+            failure = new LaneProtocolError("task_unknown");
+        } catch {
+          failure = new LaneProtocolError("task_unknown");
+        }
+      }
+      const { receipt, changed } = this.r.transfer(request, failure);
+      if (changed) this.changed(receipt.after.version);
+      return { kind: "transfer", receipt };
+    }
     const before = this.r.version;
     const result = await this.#execute(input);
     if (this.r.version > before) this.changed(this.r.version);
     return result;
   }
-  async #execute(input: z.output<typeof laneInputSchema>): Promise<LaneReply> {
+  async #execute(
+    input: Exclude<
+      z.output<typeof laneInputSchema>,
+      { op: "observe" | "operation" | "transfer" }
+    >,
+  ): Promise<LaneReply> {
     switch (input.op) {
       case "membership":
         return {

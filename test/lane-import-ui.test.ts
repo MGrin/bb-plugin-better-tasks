@@ -583,6 +583,12 @@ for (const failure of ["unavailable", "corrupt"] as const) {
       assert.equal(uncertain.queryByRole("option", { name: "Create a new lane…" }), null);
       assert.equal((uncertain.getByRole("combobox") as HTMLSelectElement).value, "");
       assert.equal(creates, 0);
+      await user.selectOptions(fresh.getByRole("combobox"), "__create__");
+      await user.click(fresh.getByRole("button", { name: "Create lane" }));
+      await waitFor(() => assert.match(q.getByRole("alert").textContent ?? "", /Creation could not be confirmed/));
+      assert.ok(uncertain.queryByRole("option", { name: "Create a new lane…" }) === null, "earlier uncertain source stays blocked after another create");
+      assert.ok(fresh.queryByRole("option", { name: "Create a new lane…" }) === null, "new uncertain source is blocked too");
+      assert.equal(creates, 1);
     } finally {
       view.unmount();
       dom.window.close();

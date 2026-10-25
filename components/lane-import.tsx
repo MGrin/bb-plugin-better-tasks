@@ -122,7 +122,7 @@ export function LaneImport({
     setError(null);
     let sent = false;
     try {
-      const journal = readPending();
+      const journal = { ...readPending(), ...pending };
       if (journal[key]) {
         setPending(journal);
         return;
@@ -143,7 +143,7 @@ export function LaneImport({
       map(label, result.lane.id);
       setNewSources((current) => ({ ...current, [key]: false }));
       focusDestination.current = key;
-      const remaining = readPending();
+      const remaining = { ...readPending(), ...journal };
       delete remaining[key];
       savePending(remaining);
       await controller

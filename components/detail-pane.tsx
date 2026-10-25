@@ -54,7 +54,9 @@ export function DetailPane({
   rpc,
   actions,
   onClose,
+  laneField,
 }: {
+  laneField?: ReactNode;
   taskId: string;
   row: Row | undefined;
   rows: ReadonlyMap<string, Row>;
@@ -164,6 +166,7 @@ export function DetailPane({
                 <span>{PRIORITY_LABEL[priority]}</span>
               </Field>
             ) : null}
+            <Field label="Lane">{laneField}</Field>
             {labelIds.length > 0 ? (
               <Field label="Labels">
                 <span className="flex flex-wrap gap-1">

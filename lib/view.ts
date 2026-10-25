@@ -8,10 +8,14 @@ import {
   type Status,
 } from "./model.ts";
 
+import type { LaneMembership } from "./lanes/model.ts";
+
 export type SortKey = "priority" | "updated" | "created" | "manual";
 
 export interface Filters {
   projectIds: string[];
+  laneIds: string[];
+  noLane: boolean;
   statuses: Status[];
   priorities: Priority[];
   labelIds: string[];
@@ -22,6 +26,8 @@ export interface Filters {
 
 export const DEFAULT_FILTERS: Filters = {
   projectIds: [],
+  laneIds: [],
+  noLane: false,
   statuses: [],
   priorities: [],
   labelIds: [],
@@ -62,7 +68,12 @@ export function matches(
   filters: Filters,
   terms: readonly string[],
   extraMatches?: ReadonlySet<string>,
+  memberships?: ReadonlyMap<string, LaneMembership>,
 ): boolean {
+  if (filters.laneIds.length > 0 || filters.noLane) {
+    const laneId = memberships?.get(row.id)?.laneId ?? null;
+    if (laneId === null ? !filters.noLane : !filters.laneIds.includes(laneId)) return false;
+  }
   if (filters.projectIds.length > 0 && !filters.projectIds.includes(row.projectId)) {
     return false;
   }
@@ -124,11 +135,12 @@ export function groupRows(
   rows: Iterable<Row>,
   filters: Filters,
   extraMatches?: ReadonlySet<string>,
+  memberships?: ReadonlyMap<string, LaneMembership>,
 ): Groups {
   const terms = searchTerms(filters.search);
   const groups = emptyGroups();
   for (const row of rows) {
-    if (matches(row, filters, terms, extraMatches)) groups[row.status].push(row);
+    if (matches(row, filters, terms, extraMatches, memberships)) groups[row.status].push(row);
   }
   for (const status of STATUSES) {
     groups[status].sort(comparator(filters.sort, status === "done" || status === "canceled"));
@@ -187,6 +199,8 @@ export function parseFilters(raw: unknown): Filters {
   const sort = value.sort;
   return {
     projectIds: strings(value.projectIds),
+    laneIds: strings(value.laneIds),
+    noLane: value.noLane === true,
     statuses: strings(value.statuses).filter(isStatus),
     priorities: strings(value.priorities).filter(isPriority),
     labelIds: strings(value.labelIds),

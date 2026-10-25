@@ -42,6 +42,10 @@ import {
   type ListItem,
 } from "@/lib/view";
 
+import { useLanes } from "./components/use-lanes";
+import { LaneNavigation } from "./components/lanes";
+import { LanePicker } from "./components/lane-picker";
+
 const PANEL_PATH = "board";
 
 interface UiState {
@@ -104,6 +108,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
   const storageKey = `${pluginId}:ui:v1`;
   const navigate = useBbNavigate();
   const { rpc, store, revision, metrics, error, retry } = useBoard();
+  const lanes = useLanes();
   const [ui, setUi] = useState<UiState>(() => readUi(storageKey));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -144,9 +149,9 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
 
   // Derived views. `revision` changes whenever any row does.
   const groups = useMemo(
-    () => groupRows(store.rows.values(), filters, descriptionHits ?? undefined),
+    () => groupRows(store.rows.values(), filters, descriptionHits ?? undefined, lanes.store.memberships),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [revision, filters, descriptionHits],
+    [revision, filters, descriptionHits, lanes.revision],
   );
   const statuses = useMemo(() => visibleStatuses(filters), [filters]);
   const listCollapsed = useMemo(() => new Set(ui.listCollapsed), [ui.listCollapsed]);
@@ -155,7 +160,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
   const allCounts = useMemo(() => store.countsByStatus(), [store, revision]);
   const filtered =
     filters.search !== "" ||
-    filters.projectIds.length + filters.priorities.length + filters.labelIds.length > 0 ||
+    filters.projectIds.length + filters.priorities.length + filters.labelIds.length + filters.laneIds.length > 0 || filters.noLane ||
     filters.liveOnly;
 
   const columnCounts = useMemo(() => {
@@ -430,6 +435,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
             }
             onHelp={() => setHelpOpen(true)}
           />
+          <LaneNavigation controller={lanes} filters={filters} onFilters={setFilters} rows={store.rows} complete={store.closedLoaded}/>
           <div className="@container/body flex min-h-0 flex-1">
             <main
               className={cn("@container/list flex min-w-0 flex-1 flex-col", detailOpen && "@max-[720px]/body:hidden")}
@@ -503,6 +509,9 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
                   labels={lookup.labels}
                   rpc={rpc}
                   actions={actions}
+                  laneField={<LanePicker lanes={lanes.store.lanes.values()} membership={lanes.store.memberships.get(detailId)}
+                    disabled={lanes.store.version<0}
+                    onChange={(laneId,expectedRevision)=>{void lanes.mutate({op:"assign",taskId:detailId,laneId,expectedRevision}).catch(e=>toast.error(String(e)));}}/>}
                   onClose={() => openTask(null)}
                 />
               )

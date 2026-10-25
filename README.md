@@ -4,9 +4,10 @@ A fast task board for [bb](https://github.com/get-bb/bb). Every task in every
 project, open work first, in a list or a board — and it stays fast when the
 board holds thousands of tasks and agents are changing them all day.
 
-It reads and writes through bb's built-in **Tasks** plugin. It keeps no data of
-its own and never touches the Tasks database: your tasks stay where they are,
-and both pages show the same board.
+It reads and writes tasks through bb's built-in **Tasks** plugin and never touches
+the Tasks database. Goal lanes and their memberships persist separately in this
+plugin's own supported SQLite storage. Tasks, labels, statuses, and attachments
+stay in core Tasks.
 
 ## What it does
 
@@ -16,7 +17,10 @@ and both pages show the same board.
 - **List and board**, per project or across all of them.
 - **Search** over key and title as you type, plus the task descriptions
   (searched by the Tasks plugin, shown as `+N`).
-- **Filters** by project, status, priority, label and "agent working now".
+- **Goal lanes** group tasks across projects by stable identity, with a goal,
+  optional operator, and active, parked, or archived lifecycle. Each task has
+  zero or one lane. Lanes and labels remain independent.
+- **Filters** by lane/no-lane, project, status, priority, label and "agent working now".
   Filters, view and collapsed groups persist per browser.
 - **Change status and priority in place** — from a row, a card, the detail
   pane, drag a card between columns, or with the keyboard.
@@ -89,13 +93,97 @@ plugin enabled.
 
 ```sh
 npm install
-npm test            # node --test over test/*.test.ts
+npm test            # tsx + node:test, including synthetic SDK UI acceptance
 npm run typecheck   # tsc --noEmit
 bb plugin build .   # dist/ bundles
+# Reload only an authorized development installation:
 bb plugin reload better-tasks
 ```
 
-Tests use synthetic tasks only.
+Tests use synthetic tasks only. For a contained browser preview, run
+`bb plugin build .`, then `npx tsx test/preview-server.ts`. It binds an ephemeral
+loopback port and uses SDK fake-host SQLite plus synthetic task/owner fixtures.
+It never installs or reloads a plugin. Stop the fixture with Ctrl-C.
+
+## Working with lanes
+
+Open **Lanes** to create or edit a goal, replace its operator, or park/archive/
+restore it. **View tasks** scopes the existing virtualized list or board across
+projects. The task detail's **Lane** field assigns or unassigns a task. Lane and
+label filters combine. Archived lanes remain searchable and viewable.
+
+Lifecycle edits preserve task statuses, attached threads, labels, and memberships.
+An active lane is organizational state; **working now** derives from attached
+task threads actually starting or working. Missing/unloaded task rows are counted
+as unavailable, never silently deleted. Even a confirmed deleted task retains its
+membership until explicit unassignment. Owner lookup displays available, archived,
+missing, or unknown; it never substitutes another operator.
+
+Names are not identity. IDs distinguish lanes with duplicate names. Mutations
+use observed revisions and reject stale edits with current values. Reload and
+review before saving a conflicting edit. Membership tombstones retain revisions
+after unassignment.
+
+### Agent API
+
+See [the lane skill](skills/lanes/SKILL.md) for complete CLI examples:
+`bb better-tasks lane list|get|create|update|archive|restore|assign|unassign|owner`.
+Each command accepts `--input '<JSON>'` and returns JSON. Reads default to 100
+records, capped at 500; follow `nextCursor`. Conflicts exit nonzero.
+
+Typed RPC methods are `lane` (validated operation union), `laneSnapshot`,
+`laneChanges`, `laneImportPreview`, and `laneImportApply`. See
+[contracts](lib/lanes/contract.ts) and [import inputs](lib/lanes/import-model.ts).
+The independent `lanes` realtime channel carries its persisted version; clients
+pull bounded deltas or reset to a lane snapshot after falling behind. Every
+reconnect takes an authoritative lane snapshot so restored backups with reused
+version numbers cannot leave stale lane data visible. Lane-only
+edits do not reload the task board or its descriptions.
+
+### Importing existing lane labels
+
+**Import lane labels** maps explicitly selected project/label IDs to existing
+lane IDs. Create destination lanes first. The preview shows source projects,
+label IDs, affected tasks, existing membership, and conflicts. Matching names
+across boards never merge automatically. Several explicit mappings may share a
+lane. Resolve each ambiguous/existing membership conflict or skip it.
+
+Apply revalidates all reviewed source facts and revisions, then writes lane
+memberships and a receipt in one SQLite transaction. A changed preview applies
+nothing. After a lost response, retry the exact preview ID and resolutions to
+retrieve its receipt without replay. Pending previews expire after 24 hours.
+Limits are 20 selected labels, 500 affected tasks, and 50,000 scanned source tasks.
+
+Core source reads and plugin writes cannot share a transaction: validation
+reflects the source facts read immediately before the lane-side transaction.
+A concurrent core label edit after that read may require a new reviewed import.
+The importer never writes core labels, statuses, or attachments, and never
+continues inferring membership after an import. Existing `marco tasks --lane`
+continues to edit labels; its adoption of this API is separate integration work.
+
+## Persistence, upgrade, and backup
+
+The old version owned no durable records. Upgrade adds append-only migrations
+to the plugin's `data.db`, through `bb.storage.database()` and
+`bb.storage.migrate()`. No core Tasks database access or automatic live-data
+migration occurs. Restart restores lane records, memberships, revisions, recent
+changes, pending previews, and committed import receipts. The last 1,000 lane
+changes are retained; older readers receive a snapshot reset.
+
+Before an authorized upgrade/uninstall, take a consistent SQLite backup of
+`<BB data dir>/plugins/better-tasks/data.db` using SQLite's backup facility.
+A raw copy of only the database while WAL writes run may omit committed data.
+Retain the backup outside the plugin directory; verify its integrity and test
+restoration in an isolated installation. Stop the plugin and close its pages
+before restoring a backup; reopen them afterward to discard pre-restore edit
+revisions. Plugin removal/data deletion may erase
+lanes and receipts while leaving core tasks intact.
+
+Integration belongs to the installation owner: review/merge the tested head,
+back up plugin data, build/install that exact version through supported BB
+commands, then verify stored lanes, assignments, and core task behavior. Keep
+live label import separate and preview it against the intended mapping.
+This feature PR does not authorize a live installation or migration.
 
 | Path | What it is |
 |---|---|

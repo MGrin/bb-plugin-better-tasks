@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Label, Project } from "../lib/model";
 import type {
   ImportMapping,
@@ -48,6 +48,8 @@ export function LaneImport({
   const [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false);
   const lock = useRef(false);
+  const destinations = useRef(new Map<string, HTMLSelectElement>());
+  const focusDestination = useRef<string | null>(null);
   const [creating, setCreating] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [newSources, setNewSources] = useState<Record<string, boolean>>({});
@@ -70,6 +72,11 @@ export function LaneImport({
   const sourceName = (l: Label) =>
     `${projects.find((p) => p.id === l.projectId)?.name ?? "Unknown project"} · ${l.name}`;
   const ready = !sourcesLoading && controller.store.version >= 0;
+  useEffect(() => {
+    if (busy || !ready || focusDestination.current === null) return;
+    destinations.current.get(focusDestination.current)?.focus();
+    focusDestination.current = null;
+  }, [busy, ready]);
   function savePending(value: Pending) {
     sessionStorage.setItem(journalKey, JSON.stringify(value));
     setPending(value);
@@ -79,6 +86,15 @@ export function LaneImport({
     lock.current = true;
     setBusy(true);
     setError(null);
+    try {
+      const restored = readPending();
+      // An empty storage read cannot disprove a previously uncertain write.
+      setPending((current) => ({ ...restored, ...current }));
+    } catch {
+      setError(
+        "Cannot read pending lane creations. Restore browser storage and check again.",
+      );
+    }
     try {
       controller.store.snapshot(
         await controller.rpc.call("laneSnapshot", null),
@@ -106,7 +122,7 @@ export function LaneImport({
     setError(null);
     let sent = false;
     try {
-      const journal = readPending();
+      const journal = { ...readPending(), ...pending };
       if (journal[key]) {
         setPending(journal);
         return;
@@ -126,7 +142,8 @@ export function LaneImport({
       setCreated((current) => [...current, result.lane]);
       map(label, result.lane.id);
       setNewSources((current) => ({ ...current, [key]: false }));
-      const remaining = readPending();
+      focusDestination.current = key;
+      const remaining = { ...readPending(), ...journal };
       delete remaining[key];
       savePending(remaining);
       await controller
@@ -254,6 +271,10 @@ export function LaneImport({
                 </p>
               </details>
               <select
+                ref={(element) => {
+                  if (element) destinations.current.set(key, element);
+                  else destinations.current.delete(key);
+                }}
                 disabled={busy || !ready}
                 aria-label={`Destination for ${sourceName(l)}`}
                 className={laneSelectClass + " mt-1 w-full"}
@@ -327,7 +348,7 @@ export function LaneImport({
           </p>
         ) : null}
       </div>
-      {error || (pending && Object.keys(pending).length > 0) ? (
+      {error || pending === null || Object.keys(pending).length > 0 ? (
         <Button
           size="sm"
           variant="outline"

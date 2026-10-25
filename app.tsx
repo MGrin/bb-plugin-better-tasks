@@ -437,7 +437,7 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
             }
             onHelp={() => setHelpOpen(true)}
           />
-          <LaneNavigation open={lanesOpen} onOpenChange={setLanesOpen} labels={store.labels} projects={store.projects} controller={lanes} filters={filters} onFilters={setFilters} rows={store.rows} complete={store.closedLoaded}/>
+          <LaneNavigation open={lanesOpen} onOpenChange={setLanesOpen} labels={store.labels} projects={store.projects} sourcesLoading={store.version < 0} controller={lanes} filters={filters} onFilters={setFilters} rows={store.rows} complete={store.closedLoaded}/>
           <div className="@container/body flex min-h-0 flex-1">
             <main
               className={cn("@container/list flex min-w-0 flex-1 flex-col", detailOpen && "@max-[720px]/body:hidden")}

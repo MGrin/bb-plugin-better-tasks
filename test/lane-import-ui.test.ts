@@ -111,27 +111,34 @@ test("zero-lane import creates explicit destinations and preserves reviewed impo
   let loseResponse = false;
   let snapshotOffline = false;
   let loseApply = false;
+  let releaseClosed: (() => void) | undefined;
+  const closed = new Promise<void>((resolve) => {
+    releaseClosed = resolve;
+  });
   const app = await loadPluginApp(() => import("../app.tsx"));
   const slot = renderSlot(
     app.navPanels[0]!,
     { subPath: "" },
     {
       rpc: {
-        snapshot: () => ({
-          version: 1,
-          rows: tasks.map((t) => ({ ...t, rev: 1, live: [] })),
-          labels,
-          projects,
-          counts: {
-            todo: 2,
-            backlog: 0,
-            in_progress: 0,
-            in_review: 0,
-            done: 0,
-            canceled: 0,
-          },
-          complete: true,
-        }),
+        snapshot: async (input: any) => {
+          if (input.part === "closed") await closed;
+          return {
+            version: 1,
+            rows: tasks.map((t) => ({ ...t, rev: 1, live: [] })),
+            labels,
+            projects,
+            counts: {
+              todo: 2,
+              backlog: 0,
+              in_progress: 0,
+              in_review: 0,
+              done: 0,
+              canceled: 0,
+            },
+            complete: input.part !== "open",
+          };
+        },
         changes: () => ({
           changes: { from: 1, to: 1, upserts: [], removes: [] },
         }),
@@ -184,6 +191,9 @@ test("zero-lane import creates explicit destinations and preserves reviewed impo
     const b = within(
       screen.getByRole("group", { name: "Board B · lane: shared" }),
     );
+    // Metadata from the open snapshot is sufficient; closed rows may stall.
+    assert.equal((a.getByRole("combobox") as HTMLSelectElement).disabled, false);
+    releaseClosed!();
     assert.equal(
       (
         screen.getByRole("button", {
@@ -210,6 +220,10 @@ test("zero-lane import creates explicit destinations and preserves reviewed impo
     );
     const aId = (a.getByRole("combobox") as HTMLSelectElement).value;
     assert.ok(aId);
+    await waitFor(() => assert.ok(
+      dom.window.document.activeElement === a.getByRole("combobox"),
+      "focus returns to the created source, not another same-name source",
+    ));
     assert.equal((b.getByRole("combobox") as HTMLSelectElement).value, "");
     await user.selectOptions(b.getByRole("combobox"), "__create__");
     await user.click(b.getByRole("button", { name: "Create lane" }));
@@ -331,6 +345,7 @@ test("zero-lane import creates explicit destinations and preserves reviewed impo
     await user.selectOptions(reopened.getByRole("combobox"), recoveredId);
     assert.equal(createCalls, 3);
   } finally {
+    releaseClosed!();
     slot.lifecycle.unmount();
     await harness.lifecycle.dispose();
     dom.window.close();
@@ -428,6 +443,10 @@ test("import distinguishes loading and empty labels and reconciles without repla
       assert.match(q.getByRole("alert").textContent ?? "", /Lane created/),
     );
     assert.equal((q.getByRole("combobox") as HTMLSelectElement).value, lane.id);
+    assert.ok(
+      dom.window.document.activeElement === q.getByRole("combobox"),
+      "focus returns to the source destination even when refresh fails",
+    );
     assert.equal(
       (q.getByRole("button", { name: "Preview import" }) as HTMLButtonElement)
         .disabled,
@@ -494,3 +513,85 @@ test("import distinguishes loading and empty labels and reconciles without repla
     dom.window.close();
   }
 });
+
+for (const failure of ["unavailable", "corrupt"] as const) {
+  test(`import recovers ${failure} storage in place and keeps uncertain sources blocked`, async () => {
+    const dom = setupDom();
+    const { createElement } = await import("react");
+    const { render, within, waitFor } = await import("@testing-library/react");
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const { LaneImport } = await import("../components/lane-import.tsx");
+    const { LaneClient } = await import("../lib/lanes/client.ts");
+    const store = new LaneClient();
+    store.snapshot({ version: 0, lanes: [], memberships: [] });
+    const journalKey = "better-tasks:lane-import-pending:v1";
+    const journal = JSON.stringify({ '["project","uncertain"]': { name: "goal" } });
+    const storage = dom.window.sessionStorage;
+    storage.setItem(journalKey, failure === "corrupt" ? "corrupt" : journal);
+    let unavailable = failure === "unavailable";
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => {
+          if (unavailable) throw new Error("Storage unavailable");
+          return storage.getItem(key);
+        },
+        setItem: (key: string, value: string) => storage.setItem(key, value),
+      },
+    });
+    let creates = 0;
+    const controller = {
+      store, revision: 0, error: null,
+      refresh: async () => {},
+      rpc: { call: async (method: string) => {
+        if (method === "laneSnapshot") return { version: 0, lanes: [], memberships: [] };
+        creates++;
+        throw new Error("Recovery must never create a lane");
+      } },
+    } as unknown as import("../components/use-lanes.ts").LanesController;
+    const labels = [
+      { id: "uncertain", projectId: "project", name: "lane: goal", color: "blue" },
+      { id: "fresh", projectId: "project", name: "lane: fresh", color: "blue" },
+    ];
+    const projects = [{ id: "project", name: "Board", prefix: "B", color: "blue" }];
+    const view = render(createElement(LaneImport, { controller, labels, projects }));
+    const q = within(view.container);
+    const user = userEvent.setup({ document: dom.window.document });
+    try {
+      assert.match(q.getByRole("alert").textContent ?? "", /Cannot read pending/);
+      assert.equal(q.queryByRole("option", { name: "Create a new lane…" }), null);
+      // Storage returns while the same import component remains mounted.
+      unavailable = false;
+      storage.setItem(journalKey, journal);
+      await user.click(q.getByRole("button", { name: "Check lanes again" }));
+      await waitFor(() => assert.equal(q.queryByRole("alert"), null));
+      const uncertain = within(q.getByRole("group", { name: "Board · lane: goal" }));
+      const fresh = within(q.getByRole("group", { name: "Board · lane: fresh" }));
+      assert.equal(uncertain.queryByRole("option", { name: "Create a new lane…" }), null);
+      assert.ok(fresh.getByRole("option", { name: "Create a new lane…" }));
+      assert.equal((fresh.getByRole("combobox") as HTMLSelectElement).value, "");
+      assert.equal(storage.getItem(journalKey), journal);
+      assert.equal(creates, 0);
+      // A later failed read or empty restored journal cannot clear known uncertainty.
+      unavailable = true;
+      await user.click(q.getByRole("button", { name: "Check lanes again" }));
+      await waitFor(() => assert.match(q.getByRole("alert").textContent ?? "", /Cannot read pending/));
+      unavailable = false;
+      storage.setItem(journalKey, "{}");
+      await user.click(q.getByRole("button", { name: "Check lanes again" }));
+      await waitFor(() => assert.equal(q.queryByRole("alert"), null));
+      assert.equal(uncertain.queryByRole("option", { name: "Create a new lane…" }), null);
+      assert.equal((uncertain.getByRole("combobox") as HTMLSelectElement).value, "");
+      assert.equal(creates, 0);
+      await user.selectOptions(fresh.getByRole("combobox"), "__create__");
+      await user.click(fresh.getByRole("button", { name: "Create lane" }));
+      await waitFor(() => assert.match(q.getByRole("alert").textContent ?? "", /Creation could not be confirmed/));
+      assert.ok(uncertain.queryByRole("option", { name: "Create a new lane…" }) === null, "earlier uncertain source stays blocked after another create");
+      assert.ok(fresh.queryByRole("option", { name: "Create a new lane…" }) === null, "new uncertain source is blocked too");
+      assert.equal(creates, 1);
+    } finally {
+      view.unmount();
+      dom.window.close();
+    }
+  });
+}

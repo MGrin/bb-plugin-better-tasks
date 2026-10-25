@@ -99,6 +99,7 @@ export function LaneNavigation({
   complete,
   labels,
   projects,
+  sourcesLoading,
   open,
   onOpenChange,
 }: {
@@ -106,6 +107,7 @@ export function LaneNavigation({
   onOpenChange: (open: boolean) => void;
   labels: readonly Label[];
   projects: readonly Project[];
+  sourcesLoading: boolean;
   controller: LanesController;
   filters: Filters;
   onFilters: (f: Filters) => void;
@@ -153,7 +155,7 @@ export function LaneNavigation({
               controller={controller}
               labels={labels}
               projects={projects}
-              sourcesLoading={!complete}
+              sourcesLoading={sourcesLoading}
             />
           ) : (
             <LaneManager

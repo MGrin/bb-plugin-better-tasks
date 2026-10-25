@@ -155,6 +155,8 @@ export default function plugin(bb: BbPluginApi) {
 
   const laneHandlers=laneBackend(bb,{
     getTask:api.getTask,
+    listLabels:api.listLabels,
+    listTasks:input=>call("listTasks",input),
     async getOwner(id){
       try {
         const thread=await bb.sdk.threads.get({threadId:id});

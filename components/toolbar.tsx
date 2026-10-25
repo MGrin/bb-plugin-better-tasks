@@ -139,7 +139,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
   const filterCount =
     filters.statuses.length +
     filters.priorities.length +
-    filters.labelIds.length +
+    filters.labelIds.length + filters.laneIds.length + (filters.noLane ? 1 : 0) +
     (filters.liveOnly ? 1 : 0);
   const projectById = new Map(projects.map((project) => [project.id, project]));
 
@@ -281,7 +281,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
             <DropdownMenuSeparator />
             <DropdownMenuCheckboxItem
               checked={false}
-              onCheckedChange={() => set({ statuses: [], priorities: [], labelIds: [], liveOnly: false })}
+              onCheckedChange={() => set({ statuses: [], priorities: [], labelIds: [], liveOnly: false, laneIds: [], noLane: false })}
             >
               <Icon name="X" className="size-3.5" />
               Clear filters

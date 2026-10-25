@@ -116,6 +116,7 @@ test("people create, rename, park, archive and restore a lane through accessible
   const { screen, waitFor } = await import("@testing-library/react");
   const user = userEvent.setup({ document: dom.window.document });
   await user.click(await slot.findByRole("button", { name: "Lanes" }));
+  await user.click(screen.getByRole("menuitem", { name: "Manage lanes" }));
   await user.click(screen.getByRole("button", { name: "New lane" }));
   await user.type(screen.getByLabelText("Lane name"), "Synthetic goal");
   await user.type(screen.getByLabelText("Goal"), "Ship useful work");

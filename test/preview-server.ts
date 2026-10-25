@@ -91,6 +91,20 @@ if (process.env.BTASK_PREVIEW_EMPTY !== "1") {
     laneId: created.lane.id,
     expectedRevision: 0,
   });
+  // Selector acceptance: many lifecycle states, duplicate names and a long name.
+  for (let i = 0; i < 23; i++) {
+    const result: any = await harness.behavior.callRpc("lane", {
+      op: "create",
+      name: i < 2 ? "Shared synthetic goal" : i < 4
+        ? "A long synthetic lane name ".repeat(6).slice(0, 160).trim()
+        : `Archived synthetic goal ${String(i).padStart(2, "0")}`,
+      goal: "Synthetic selector fixture only",
+    });
+    await harness.behavior.callRpc("lane", {
+      op: "update", id: result.lane.id, expectedRevision: result.lane.revision,
+      patch: { state: i === 0 ? "parked" : "archived" },
+    });
+  }
 }
 await build({
   entryPoints: ["test/preview.tsx"],
@@ -138,7 +152,7 @@ const snapshot = {
   counts,
   complete: true,
 };
-const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Synthetic lanes acceptance</title><style>@layer theme,base,components,utilities;</style><link rel="stylesheet" href="/style.css"><style>@layer base{*{box-sizing:border-box;border:0 solid}button,input,textarea,select{font:inherit;color:inherit}button{background:transparent}ul{list-style:none;margin:0;padding:0}p,h2{margin:0}}:root{--background:#fff;--foreground:#171717;--card:#fff;--muted-foreground:#626262;--border:#ddd;--input:#ccc;--ring:#999;--state-hover:#eee;--state-active:#e5e5e5;--destructive:#c22}html,body,#root{height:100%;margin:0}body{font:14px system-ui}#root{display:flex;flex-direction:column}body>div{height:100%}</style></head><body data-bb-plugin-root><script type="module" src="/preview.js"></script></body></html>`;
+const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Synthetic lanes acceptance</title><style>@layer theme,base,components,utilities;</style><link rel="stylesheet" href="/style.css"><style>@layer base{*{box-sizing:border-box;border:0 solid}button,input,textarea,select{font:inherit;color:inherit}button{background:transparent}ul{list-style:none;margin:0;padding:0}p,h2{margin:0}}:root{--background:#fff;--foreground:#171717;--card:#fff;--popover:#fff;--popover-foreground:#171717;--muted:#eee;--radius:0.5rem;--surface-recessed-solid:#f6f6f6;--muted-foreground:#626262;--border:#ddd;--input:#ccc;--ring:#999;--state-hover:#eee;--state-active:#e5e5e5;--destructive:#c22}html,body,#root{height:100%;margin:0}body{font:14px system-ui}#root{display:flex;flex-direction:column}body>div{height:100%}</style></head><body data-bb-plugin-root><script type="module" src="/preview.js"></script></body></html>`;
 const server = createServer(async (req, res) => {
   try {
     if (req.method === "POST") {

@@ -1,14 +1,11 @@
 // The bar above the board: scope, filters, sort, view and search.
 import { forwardRef, type ReactNode } from "react";
 import {
-  DropdownMenu,
   DropdownMenuCheckboxItem,
-  DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Icon } from "@/components/ui/icon";
 import { ColorDot, LiveDot, PriorityGlyph, StatusGlyph } from "@/components/glyphs";
@@ -23,6 +20,7 @@ import {
 } from "@/lib/model";
 import type { Filters, SortKey } from "@/lib/view";
 import { cn } from "@/lib/utils";
+import { Menu, ToolbarButton } from "./toolbar-menu";
 
 export type ViewMode = "list" | "board";
 
@@ -37,64 +35,8 @@ function toggle<T>(values: readonly T[], value: T): T[] {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 }
 
-function ToolbarButton({
-  children,
-  active,
-  className,
-  ...props
-}: React.ComponentProps<"button"> & { active?: boolean }) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] text-muted-foreground outline-none transition-colors hover:bg-state-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-state-active data-[state=open]:text-foreground",
-        active && "text-foreground",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Menu({
-  trigger,
-  children,
-  label,
-  active,
-  align = "start",
-}: {
-  trigger: ReactNode;
-  children: ReactNode;
-  label: string;
-  active?: boolean;
-  align?: "start" | "end";
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <ToolbarButton aria-label={label} active={active}>
-          {trigger}
-        </ToolbarButton>
-      </DropdownMenuTrigger>
-      {/* The toolbar is the top of the board, so there is never more room above it. Radix's
-          collision flip still opened the projects list upward on an iPad, clipping its top
-          off-screen. Always open downward, capped to the room left below, scrolling inside. */}
-      <DropdownMenuContent
-        align={align}
-        side="bottom"
-        avoidCollisions={false}
-        collisionPadding={8}
-        className="max-h-[min(70vh,var(--radix-dropdown-menu-content-available-height,70vh))] min-w-56 overflow-y-auto"
-      >
-        {children}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 export interface ToolbarProps {
+  laneFilter?: ReactNode;
   filters: Filters;
   onFilters: (next: Filters) => void;
   view: ViewMode;
@@ -121,6 +63,7 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
     total,
     descriptionHits,
     onHelp,
+    laneFilter,
   },
   searchRef,
 ) {
@@ -185,6 +128,8 @@ export const Toolbar = forwardRef<HTMLInputElement, ToolbarProps>(function Toolb
           </DropdownMenuCheckboxItem>
         ))}
       </Menu>
+
+      {laneFilter}
 
       <div className="mx-1 h-5 w-px bg-border @max-[640px]/bar:hidden" />
 

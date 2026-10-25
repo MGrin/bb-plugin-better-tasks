@@ -173,6 +173,7 @@ test("zero-lane import creates explicit destinations and preserves reviewed impo
   const user = userEvent.setup({ document: dom.window.document });
   try {
     await user.click(await slot.findByRole("button", { name: "Lanes" }));
+    await user.click(screen.getByRole("menuitem", { name: "Manage lanes" }));
     await screen.findByText("No lanes yet.");
     await user.click(
       screen.getByRole("button", { name: "Import lanes from labels" }),

@@ -1,6 +1,6 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { laneInputSchema } from "./contract.ts";
+import { laneInputSchema, newLaneReplySchema } from "./contract.ts";
 import type { LaneChanges, LaneReply, LaneSnapshot } from "./model.ts";
 import { LaneRepository, MIGRATIONS } from "./repository.ts";
 import { LaneService, type LaneAdapters } from "./service.ts";
@@ -22,7 +22,27 @@ export const laneRpcMethods = {
     input: applyInputSchema,
     output: z.custom<ImportReceipt>(),
   },
-  lane: { input: laneInputSchema, output: z.custom<LaneReply>() },
+  lane: {
+    input: laneInputSchema,
+    output: z.union([
+      newLaneReplySchema,
+      z.custom<LaneReply>(
+        (value) =>
+          !!value &&
+          typeof value === "object" &&
+          "kind" in value &&
+          [
+            "membership",
+            "list",
+            "detail",
+            "create",
+            "update",
+            "assign",
+            "owner",
+          ].includes(String(value.kind)),
+      ),
+    ]),
+  },
   laneSnapshot: { input: z.null(), output: z.custom<LaneSnapshot>() },
   laneChanges: {
     input: z.object({ since: z.number().int().nonnegative() }).strict(),

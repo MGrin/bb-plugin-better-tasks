@@ -6,6 +6,7 @@ import {
 } from "@get-bb/plugin-sdk/testing";
 import plugin from "../server.ts";
 import { task } from "./fixtures.ts";
+import { MIGRATIONS, LaneRepository } from "../lib/lanes/repository.ts";
 
 function host() {
   const h = createFakePluginHost({
@@ -186,5 +187,124 @@ test("owner lifecycle invalidations only publish for lanes that reference the th
     harness.realtimeSignals.filter((s) => s.channel === "lane-owners").length,
     1,
   );
+  await harness.lifecycle.dispose();
+});
+
+test("new CLI operations return typed observations, immutable conflicts and lookup JSON", async () => {
+  const { harness } = host();
+  const created: any = await harness.behavior.callRpc("lane", {
+    op: "create",
+    name: "A",
+  });
+  const run = (op: string, input: unknown) =>
+    harness.behavior.runCli(["lane", op, "--input", JSON.stringify(input)]);
+  const o = JSON.parse(
+    (
+      await run("observe", {
+        taskId: "task",
+        destinationLaneId: created.lane.id,
+      })
+    ).stdout,
+  );
+  assert.equal(o.kind, "observation");
+  assert.equal(o.observation.membership.revision, 0);
+  const { id, revision, state, ownerThreadId } = created.lane;
+  const p = {
+    taskId: "task",
+    laneId: id,
+    operationId: "11111111-1111-4111-8111-111111111111",
+    expected: {
+      membershipRevision: 0,
+      fromLaneId: null,
+      source: null,
+      destination: { id, revision, state, ownerThreadId },
+    },
+  };
+  const applied = await run("transfer", p);
+  assert.equal(applied.exitCode, 0);
+  const conflict = await run("transfer", {
+    ...p,
+    operationId: "22222222-2222-4222-8222-222222222222",
+  });
+  assert.equal(conflict.exitCode, 1);
+  assert.equal(
+    JSON.parse(conflict.stdout).receipt.reason,
+    "membership_changed",
+  );
+  const found = await run("operation", { operationId: p.operationId });
+  assert.equal(found.exitCode, 0);
+  assert.deepEqual(
+    JSON.parse(found.stdout).receipt,
+    JSON.parse(applied.stdout).receipt,
+  );
+  const missing = await run("operation", {
+    operationId: "33333333-3333-4333-8333-333333333333",
+  });
+  assert.equal(missing.exitCode, 0);
+  assert.equal(JSON.parse(missing.stdout).status, "not_found");
+  for (const op of ["observe", "transfer", "operation"])
+    assert.equal(
+      (await harness.behavior.runCli(["lane", op, "--help"])).exitCode,
+      0,
+    );
+  assert.equal(
+    harness.realtimeSignals.filter((s) => s.channel === "lanes").length,
+    2,
+  );
+  await harness.lifecycle.dispose();
+});
+
+test("F29 append migration is idempotent and preserves legacy rows and replies", async () => {
+  const { bb, harness } = createFakePluginHost();
+  const db = bb.storage.database();
+  bb.storage.migrate(db, MIGRATIONS.slice(0, 2));
+  const r = new LaneRepository(db);
+  const l = r.create({ name: "Old", goal: "" });
+  r.setMembership("task", l.id, 0);
+  r.setMembership("tombstone", null, 0);
+  db.prepare("INSERT INTO lane_imports VALUES (?,?,?)").run(
+    "legacy-import",
+    '{"old":true}',
+    '{"receipt":"old"}',
+  );
+  const before = db
+    .prepare(
+      "SELECT data FROM lanes UNION ALL SELECT data FROM lane_memberships UNION ALL SELECT receipt FROM lane_imports",
+    )
+    .all();
+  bb.storage.migrate(db, MIGRATIONS);
+  bb.storage.migrate(db, MIGRATIONS);
+  assert.deepEqual(
+    db
+      .prepare(
+        "SELECT data FROM lanes UNION ALL SELECT data FROM lane_memberships UNION ALL SELECT receipt FROM lane_imports",
+      )
+      .all(),
+    before,
+  );
+  assert.deepEqual(db.prepare("SELECT count(*) n FROM lane_operations").get(), {
+    n: 0,
+  });
+  plugin(bb);
+  const assigned: any = await harness.behavior.callRpc("lane", {
+    op: "assign",
+    taskId: "task",
+    laneId: null,
+    expectedRevision: 1,
+  });
+  assert.deepEqual(Object.keys(assigned).sort(), ["kind", "result"]);
+  assert.equal(assigned.kind, "assign");
+  assert.equal(assigned.result.value.revision, 2);
+  const unassigned = await harness.behavior.runCli([
+    "lane",
+    "unassign",
+    "--input",
+    JSON.stringify({ taskId: "task", expectedRevision: 2 }),
+  ]);
+  assert.equal(unassigned.exitCode, 0);
+  assert.equal(JSON.parse(unassigned.stdout).result.value.revision, 3);
+  assert.deepEqual(db.prepare("SELECT count(*) n FROM lane_operations").get(), {
+    n: 0,
+  });
   await harness.lifecycle.dispose();
 });

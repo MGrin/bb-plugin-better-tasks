@@ -19,7 +19,8 @@ export type LanePatch = Partial<
   Pick<Lane, "name" | "goal" | "state" | "ownerThreadId">
 >;
 export type WriteResult<T> =
-  { ok: true; value: T } | { ok: false; code: "conflict"; current: T | null };
+  | { ok: true; value: T }
+  | { ok: false; code: "conflict"; current: T | null };
 export type LaneEvent =
   | { version: number; kind: "lane"; value: Lane }
   | { version: number; kind: "membership"; value: LaneMembership };
@@ -39,6 +40,7 @@ export interface LaneOwner {
   title: string | null;
 }
 export type LaneReply =
+  | import("./contract.ts").NewLaneReply
   | { kind: "membership"; membership: LaneMembership }
   | { kind: "list"; lanes: Lane[]; nextCursor: string | null }
   | {

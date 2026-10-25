@@ -103,7 +103,8 @@ bb plugin reload better-tasks
 Tests use synthetic tasks only. For a contained browser preview, run
 `bb plugin build .`, then `npx tsx test/preview-server.ts`. It binds an ephemeral
 loopback port and uses SDK fake-host SQLite plus synthetic task/owner fixtures.
-It never installs or reloads a plugin. Stop the fixture with Ctrl-C.
+It never installs or reloads a plugin. Set `BTASK_PREVIEW_EMPTY=1` to start
+with zero lanes and exercise label import. Stop the fixture with Ctrl-C.
 
 ## Working with lanes
 
@@ -142,11 +143,24 @@ edits do not reload the task board or its descriptions.
 
 ### Importing existing lane labels
 
-**Import lane labels** maps explicitly selected project/label IDs to existing
-lane IDs. Create destination lanes first. The preview shows source projects,
-label IDs, affected tasks, existing membership, and conflicts. Matching names
-across boards never merge automatically. Several explicit mappings may share a
-lane. Resolve each ambiguous/existing membership conflict or skip it.
+With no lanes, open **Lanes → Import lanes from labels**. For each source label,
+choose an existing destination or **Create a new lane…**, review its suggested
+name, and choose **Create lane**. Creation selects only that source's destination;
+it assigns no tasks or operator and starts no threads. Source project/label IDs
+remain available under **Source details**.
+
+**Preview import** shows affected tasks, existing membership, and conflicts.
+Matching names across boards never merge automatically. Several explicit mappings
+may share a lane. Resolve each ambiguous/existing membership conflict or skip it,
+then choose **Apply reviewed import**.
+
+Repeated create clicks cannot send another request while one is running.
+If creation loses its response, **Check lanes again** loads an authoritative lane
+snapshot; explicitly select the destination after reviewing it. The UI blocks
+another create for that source in the current browser tab, including dialog
+reopen and page reload. An empty read cannot prove an uncertain write will not
+finish later. Browser session storage must work for inline creation; existing
+destination mapping and reviewed import remain available without it.
 
 Apply revalidates all reviewed source facts and revisions, then writes lane
 memberships and a receipt in one SQLite transaction. A changed preview applies

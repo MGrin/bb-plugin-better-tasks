@@ -127,12 +127,14 @@ export function LaneNavigation({
               controller={controller}
               labels={labels}
               projects={projects}
+              sourcesLoading={!complete}
             />
           ) : (
             <LaneManager
               controller={controller}
               rows={rows}
               complete={complete}
+              onImport={() => setImporting(true)}
               onSelect={(id) => {
                 onFilters({ ...filters, laneIds: [id], noLane: false });
                 setOpen(false);
@@ -274,11 +276,13 @@ function LaneManager({
   rows,
   complete,
   onSelect,
+  onImport,
 }: {
   controller: LanesController;
   rows: ReadonlyMap<string, Row>;
   complete: boolean;
   onSelect: (id: string) => void;
+  onImport: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [state, setState] = useState("all");
@@ -396,7 +400,27 @@ function LaneManager({
           ))}
         </ul>
         {lanes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No lanes match.</p>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>
+              {controller.store.version < 0
+                ? "Loading lanes…"
+                : controller.store.lanes.size === 0
+                  ? "No lanes yet."
+                  : "No lanes match."}
+            </p>
+            {controller.store.version >= 0 &&
+            controller.store.lanes.size === 0 ? (
+              <>
+                <p>
+                  Bring existing lane labels into lanes, or create your first
+                  lane.
+                </p>
+                <Button size="sm" variant="outline" onClick={onImport}>
+                  Import lanes from labels
+                </Button>
+              </>
+            ) : null}
+          </div>
         ) : null}
       </div>
       {editing !== undefined ? (

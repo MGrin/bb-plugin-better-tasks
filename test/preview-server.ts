@@ -72,24 +72,26 @@ const { bb, harness } = createFakePluginHost({
   },
 });
 plugin(bb);
-const created: any = await harness.behavior.callRpc("lane", {
-  op: "create",
-  name: "Synthetic cross-board goal",
-  goal: "Verify lane behavior",
-  ownerThreadId: "operator",
-});
-await harness.behavior.callRpc("lane", {
-  op: "assign",
-  taskId: "preview-a",
-  laneId: created.lane.id,
-  expectedRevision: 0,
-});
-await harness.behavior.callRpc("lane", {
-  op: "assign",
-  taskId: "preview-b",
-  laneId: created.lane.id,
-  expectedRevision: 0,
-});
+if (process.env.BTASK_PREVIEW_EMPTY !== "1") {
+  const created: any = await harness.behavior.callRpc("lane", {
+    op: "create",
+    name: "Synthetic cross-board goal",
+    goal: "Verify lane behavior",
+    ownerThreadId: "operator",
+  });
+  await harness.behavior.callRpc("lane", {
+    op: "assign",
+    taskId: "preview-a",
+    laneId: created.lane.id,
+    expectedRevision: 0,
+  });
+  await harness.behavior.callRpc("lane", {
+    op: "assign",
+    taskId: "preview-b",
+    laneId: created.lane.id,
+    expectedRevision: 0,
+  });
+}
 await build({
   entryPoints: ["test/preview.tsx"],
   bundle: true,
@@ -123,7 +125,15 @@ const snapshot = {
           ]
         : [],
   })),
-  projects: [],
+  projects: [
+    {
+      id: items[0]!.projectId,
+      name: "Demo board",
+      prefix: "DEMO",
+      color: "blue",
+    },
+    { id: "other", name: "Other board", prefix: "OTHER", color: "blue" },
+  ],
   labels,
   counts,
   complete: true,

@@ -25,6 +25,7 @@ import type {
   LaneEvent,
   WriteResult,
 } from "./model.ts";
+import { RELEASE_MIGRATION } from "../release/repository.ts";
 
 export const MIGRATIONS = [
   `CREATE TABLE lanes (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -34,6 +35,7 @@ export const MIGRATIONS = [
    CREATE TABLE lane_changes (version INTEGER PRIMARY KEY, data TEXT NOT NULL);`,
   `CREATE TABLE lane_imports (id TEXT PRIMARY KEY, preview TEXT NOT NULL, receipt TEXT);`,
   `CREATE TABLE lane_operations (id TEXT PRIMARY KEY NOT NULL, request TEXT NOT NULL, receipt TEXT NOT NULL);`,
+  RELEASE_MIGRATION,
 ];
 
 function read<T>(row: unknown): T | null {

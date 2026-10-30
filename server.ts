@@ -20,6 +20,7 @@ import {
 import { TaskSync, type TasksApi, type TaskThreadFields } from "./lib/sync.ts";
 
 import { laneBackend, laneRpcMethods } from "./lib/lanes/backend.ts";
+import type { ReleaseRecord, ReleaseReply } from "./lib/release/model.ts";
 
 const TASKS_PLUGIN = "tasks";
 
@@ -35,6 +36,8 @@ export interface TaskDetail {
     createdAt: string;
   }[];
   subtasks: string[];
+  /** Written by train tooling only; the board shows it read-only. */
+  release: ReleaseRecord | null;
 }
 
 const statusSchema = z.enum(STATUSES);
@@ -207,6 +210,10 @@ export default function plugin(bb: BbPluginApi) {
             }),
           ),
           subtasks: subtasks.tasks.map((subtask) => subtask.id),
+          release: (laneHandlers.release({ op: "get", taskId }) as Extract<
+            ReleaseReply,
+            { kind: "record" }
+          >).record,
         },
       };
     },

@@ -141,6 +141,14 @@ reconnect takes an authoritative lane snapshot so restored backups with reused
 version numbers cannot leave stale lane data visible. Lane-only
 edits do not reload the task board or its descriptions.
 
+### Release stage
+
+Each task may carry a release stage: `merged-dev`, `nominated`, `boarded`,
+`go`, `live`, `verified`. Train tooling (writer `marco-train`) records it with
+`bb better-tasks release set`; the board shows it read-only in the task detail.
+The stage never changes the task status, and status edits never change the
+stage. See [the release skill](skills/release/SKILL.md).
+
 ### Importing existing lane labels
 
 With no lanes, open **Lanes → Import lanes from labels**. For each source label,
@@ -182,7 +190,8 @@ to the plugin's `data.db`, through `bb.storage.database()` and
 `bb.storage.migrate()`. No core Tasks database access or automatic live-data
 migration occurs. Restart restores lane records, memberships, revisions, recent
 changes, pending previews, and committed import receipts. The last 1,000 lane
-changes are retained; older readers receive a snapshot reset.
+changes are retained; older readers receive a snapshot reset. Release stages,
+their full write history and write receipts live in the same database.
 
 Before an authorized upgrade/uninstall, take a consistent SQLite backup of
 `<BB data dir>/plugins/better-tasks/data.db` using SQLite's backup facility.
@@ -207,6 +216,7 @@ This feature PR does not authorize a live installation or migration.
 | `lib/feed.ts` | The realtime socket, filtered to Tasks signals, with reconnect |
 | `lib/store.ts` | The page's copy of the board; merges snapshots and deltas by revision |
 | `lib/view.ts` | Filtering, sorting and grouping |
+| `lib/release/` | Release stage model, storage, train-only CLI writes |
 | `lib/virtual.ts`, `components/virtual-list.tsx` | Windowing |
 | `app.tsx`, `components/` | The page |
 

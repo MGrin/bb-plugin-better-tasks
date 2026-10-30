@@ -82,6 +82,13 @@ export function useLanes() {
     async (input: LaneInput) => {
       const result = await rpc.call("lane", input);
       await refresh();
+      if ("result" in result && !result.result.ok && result.result.code === "open_tasks")
+        throw new Error(
+          `Move or finish ${result.result.openTasks.length} open task(s) before archiving: ${result.result.openTasks
+            .slice(0, 5)
+            .map((t) => t.key ?? t.taskId)
+            .join(", ")}.`,
+        );
       if ("result" in result && !result.result.ok)
         throw new Error(
           "Lane changed in another session. Reload and review the latest values.",

@@ -1,9 +1,13 @@
-import { cliCommand, defineCli } from "@get-bb/plugin-sdk";
+import { cliCommand, defineCli, type PluginCliCommand } from "@get-bb/plugin-sdk";
 import type { LaneService } from "./service.ts";
 
 import type { LaneImporter } from "./import.ts";
 
-export function laneCli(service: LaneService, importer: LaneImporter) {
+export function laneCli(
+  service: LaneService,
+  importer: LaneImporter,
+  extra: Record<string, PluginCliCommand> = {},
+) {
   function command(op: string) {
     return cliCommand({
       summary:
@@ -50,8 +54,10 @@ export function laneCli(service: LaneService, importer: LaneImporter) {
   }
   return defineCli({
     name: "better-tasks",
-    summary: "First-class cross-project goal lanes; labels remain independent.",
+    summary:
+      "First-class cross-project goal lanes, release stages and archive guards; labels remain independent.",
     commands: {
+      ...extra,
       "lane import preview": cliCommand({
         summary:
           "Preview explicitly selected project/label to lane ID mappings (max 20 labels, 500 affected tasks).",

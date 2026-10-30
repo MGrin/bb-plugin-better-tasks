@@ -12,6 +12,17 @@ import {
   type ImportReceipt,
 } from "./import-model.ts";
 import { laneCli } from "./cli.ts";
+import { CHANNEL_TOUCHED } from "../model.ts";
+import { releaseReadSchema, type ReleaseReply } from "../release/model.ts";
+import { ReleaseRepository } from "../release/repository.ts";
+import { ReleaseService } from "../release/service.ts";
+import { releaseCommands } from "../release/cli.ts";
+import { threadHoldings, type ThreadGuardAdapters } from "../guards.ts";
+import { threadCommands } from "../guard-cli.ts";
+
+export type BackendAdapters = LaneAdapters &
+  ImportAdapters &
+  Omit<ThreadGuardAdapters, "ownedLanes">;
 
 export const laneRpcMethods = {
   laneImportPreview: {
@@ -44,15 +55,14 @@ export const laneRpcMethods = {
     ]),
   },
   laneSnapshot: { input: z.null(), output: z.custom<LaneSnapshot>() },
+  // Read-only: stages are written by train tooling through the CLI alone.
+  release: { input: releaseReadSchema, output: z.custom<ReleaseReply>() },
   laneChanges: {
     input: z.object({ since: z.number().int().nonnegative() }).strict(),
     output: z.object({ changes: z.custom<LaneChanges>().nullable() }),
   },
 };
-export function laneBackend(
-  bb: BbPluginApi,
-  adapters: LaneAdapters & ImportAdapters,
-) {
+export function laneBackend(bb: BbPluginApi, adapters: BackendAdapters) {
   const db = bb.storage.database();
   bb.storage.migrate(db, MIGRATIONS);
   const repo = new LaneRepository(db);
@@ -63,7 +73,26 @@ export function laneBackend(
   const importer = new LaneImporter(repo, adapters, (version) =>
     bb.realtime.publish("lanes", { version }),
   );
-  bb.cli.register(laneCli(service, importer));
+  const releases = new ReleaseService(new ReleaseRepository(db), adapters, (taskId) =>
+    bb.realtime.publish(CHANNEL_TOUCHED, { taskId, what: "release" }),
+  );
+  const guard: ThreadGuardAdapters = {
+    ...adapters,
+    ownedLanes: (threadId) =>
+      repo
+        .list()
+        .filter((l) => l.ownerThreadId === threadId && l.state !== "archived")
+        .map((l) => ({ id: l.id, name: l.name, taskIds: repo.memberIds(l.id) })),
+  };
+  bb.cli.register(
+    laneCli(service, importer, {
+      ...releaseCommands(releases),
+      ...threadCommands({
+        holdings: (threadId) => threadHoldings(threadId, guard),
+        archive: (threadId) => bb.sdk.threads.archive({ threadId }),
+      }),
+    }),
+  );
   // These observe-only listeners are disposed by the host with this generation.
   for (const event of [
     "thread.archived",
@@ -80,6 +109,9 @@ export function laneBackend(
     laneImportApply: (input: unknown) => importer.apply(input),
     async lane(input: z.input<typeof laneInputSchema>) {
       return service.execute(input);
+    },
+    release(input: z.input<typeof releaseReadSchema>) {
+      return releases.read(input);
     },
     laneSnapshot() {
       return repo.snapshot();

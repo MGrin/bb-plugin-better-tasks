@@ -10,6 +10,7 @@ import type { BoardActions } from "@/components/task-items";
 import type { useBoard } from "@/components/use-board";
 import { longDate, plainDate, shortAge } from "@/lib/format";
 import { PRIORITY_LABEL, STATUS_LABEL, type Label, type Project, type Row } from "@/lib/model";
+import { RELEASE_STAGE_LABEL } from "@/lib/release/model";
 import { cn } from "@/lib/utils";
 
 type Rpc = ReturnType<typeof useBoard>["rpc"];
@@ -167,6 +168,15 @@ export function DetailPane({
               </Field>
             ) : null}
             <Field label="Lane">{laneField}</Field>
+            {detail?.release ? (
+              <Field label="Release">
+                <span title={detail.release.evidence || undefined}>
+                  {RELEASE_STAGE_LABEL[detail.release.stage]}
+                  {detail.release.train ? ` · ${detail.release.train}` : ""}
+                </span>
+                <span className="text-xs text-muted-foreground">{shortAge(detail.release.updatedAt)} ago</span>
+              </Field>
+            ) : null}
             {labelIds.length > 0 ? (
               <Field label="Labels">
                 <span className="flex flex-wrap gap-1">

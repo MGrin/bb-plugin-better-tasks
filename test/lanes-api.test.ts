@@ -57,14 +57,20 @@ test("RPC and CLI share revisions without full Tasks reads or orchestration", as
     id: lane.id,
   });
   assert.equal(result.owner.status, "archived");
-  await harness.behavior.callRpc("lane", {
+  // The member task is open (todo), so the archive guard refuses.
+  const archive: any = await harness.behavior.callRpc("lane", {
     op: "update",
     id: lane.id,
     patch: { state: "archived" },
     expectedRevision: 1,
   });
+  assert.equal(archive.result.code, "open_tasks");
+  assert.deepEqual(
+    archive.result.openTasks.map((t: any) => t.status),
+    ["todo"],
+  );
   const calls = harness.inspection.sdk.calls;
-  assert.equal(calls.filter((c) => c.path === "plugins.callRpc").length, 1);
+  assert.equal(calls.filter((c) => c.path === "plugins.callRpc").length, 2);
   assert.equal(
     calls.filter(
       (c) => c.path.startsWith("threads.") && c.path !== "threads.get",

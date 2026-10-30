@@ -25,6 +25,7 @@ import type {
   LaneEvent,
   WriteResult,
 } from "./model.ts";
+import { RELEASE_MIGRATION } from "../release/repository.ts";
 
 export const MIGRATIONS = [
   `CREATE TABLE lanes (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -34,6 +35,7 @@ export const MIGRATIONS = [
    CREATE TABLE lane_changes (version INTEGER PRIMARY KEY, data TEXT NOT NULL);`,
   `CREATE TABLE lane_imports (id TEXT PRIMARY KEY, preview TEXT NOT NULL, receipt TEXT);`,
   `CREATE TABLE lane_operations (id TEXT PRIMARY KEY NOT NULL, request TEXT NOT NULL, receipt TEXT NOT NULL);`,
+  RELEASE_MIGRATION,
 ];
 
 function read<T>(row: unknown): T | null {
@@ -259,15 +261,38 @@ export class LaneRepository {
     });
   }
 
+  memberIds(laneId: string): string[] {
+    return this.db
+      .prepare("SELECT data FROM lane_memberships ORDER BY task_id")
+      .all()
+      .map((row) => read<LaneMembership>(row)!)
+      .filter((m) => m.laneId === laneId)
+      .map((m) => m.taskId);
+  }
+
+  // `checkedMembers`: the member set an archive guard has already found closed.
+  // A task that joined since then is refused as unknown rather than archived unseen.
   update(
     id: string,
     patch: LanePatch,
     expectedRevision: number,
+    checkedMembers?: readonly string[],
   ): WriteResult<Lane> {
     return this.atomic(() => {
       const current = this.get(id);
       if (!current || current.revision !== expectedRevision)
         return { ok: false, code: "conflict", current };
+      if (checkedMembers) {
+        const checked = new Set(checkedMembers);
+        const joined = this.memberIds(id).filter((taskId) => !checked.has(taskId));
+        if (joined.length > 0)
+          return {
+            ok: false,
+            code: "open_tasks",
+            current,
+            openTasks: joined.map((taskId) => ({ taskId, key: null, status: "unknown" })),
+          };
+      }
       const lane = {
         ...current,
         ...patch,

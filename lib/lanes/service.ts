@@ -6,6 +6,7 @@ import {
   canonicalTransfer,
   LaneProtocolError,
 } from "./contract.ts";
+import { heldTasks } from "../guards.ts";
 export interface LaneAdapters {
   getTask: (id: string) => Promise<unknown | null>;
   getOwner: (id: string) => Promise<LaneOwner>;
@@ -130,11 +131,32 @@ export class LaneService {
       }
       case "create":
         return { kind: "create", lane: this.r.create(input) };
-      case "update":
+      case "update": {
+        const lane = this.r.get(input.id);
+        if (
+          input.patch.state === "archived" &&
+          lane &&
+          lane.state !== "archived" &&
+          lane.revision === input.expectedRevision
+        ) {
+          // Archive guard: open members must move first. No override.
+          const members = this.r.memberIds(lane.id);
+          const openTasks = await heldTasks(members, this.a.getTask);
+          if (openTasks.length > 0)
+            return {
+              kind: "update",
+              result: { ok: false, code: "open_tasks", current: lane, openTasks },
+            };
+          return {
+            kind: "update",
+            result: this.r.update(input.id, input.patch, input.expectedRevision, members),
+          };
+        }
         return {
           kind: "update",
           result: this.r.update(input.id, input.patch, input.expectedRevision),
         };
+      }
       case "assign":
         // Cache absence is never deletion evidence. Only the public authoritative lookup may reject assignment.
         // Explicit unassignment also works for confirmed-deleted tasks.

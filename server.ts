@@ -20,8 +20,11 @@ import {
 import { TaskSync, type TasksApi, type TaskThreadFields } from "./lib/sync.ts";
 
 import { laneBackend, laneRpcMethods } from "./lib/lanes/backend.ts";
+import type { ReleaseRecord, ReleaseReply } from "./lib/release/model.ts";
+import { MAX_SUBTREE } from "./lib/guards.ts";
 
 const TASKS_PLUGIN = "tasks";
+const CHILD_PAGE = 100;
 
 export interface TaskDetail {
   task: TaskFields & { description: string };
@@ -35,6 +38,8 @@ export interface TaskDetail {
     createdAt: string;
   }[];
   subtasks: string[];
+  /** Written by train tooling only; the board shows it read-only. */
+  release: ReleaseRecord | null;
 }
 
 const statusSchema = z.enum(STATUSES);
@@ -157,6 +162,18 @@ export default function plugin(bb: BbPluginApi) {
     getTask:api.getTask,
     listLabels:api.listLabels,
     listTasks:input=>call("listTasks",input),
+    listOpenTasks:input=>call("listTasks",input),
+    listTaskThreads:api.listTaskThreads,
+    // Page explicitly: a default page size must never hide a child from the archive guard.
+    async listChildren(threadId){
+      const ids:string[]=[];
+      for(let offset=0;offset<=MAX_SUBTREE;offset+=CHILD_PAGE){
+        const page=await bb.sdk.threads.list({parentThreadId:threadId,archived:false,includeHidden:true,limit:CHILD_PAGE,offset});
+        ids.push(...page.map(thread=>thread.id));
+        if(page.length<CHILD_PAGE) break;
+      }
+      return ids;
+    },
     async getOwner(id){
       try {
         const thread=await bb.sdk.threads.get({threadId:id});
@@ -207,6 +224,10 @@ export default function plugin(bb: BbPluginApi) {
             }),
           ),
           subtasks: subtasks.tasks.map((subtask) => subtask.id),
+          release: (laneHandlers.release({ op: "get", taskId }) as Extract<
+            ReleaseReply,
+            { kind: "record" }
+          >).record,
         },
       };
     },

@@ -20,7 +20,13 @@ export type LanePatch = Partial<
 >;
 export type WriteResult<T> =
   | { ok: true; value: T }
-  | { ok: false; code: "conflict"; current: T | null };
+  | { ok: false; code: "conflict"; current: T | null }
+  | {
+      ok: false;
+      code: "open_tasks";
+      current: T | null;
+      openTasks: import("../guards.ts").HeldTask[];
+    };
 export type LaneEvent =
   | { version: number; kind: "lane"; value: Lane }
   | { version: number; kind: "membership"; value: LaneMembership };

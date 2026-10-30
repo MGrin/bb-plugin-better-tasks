@@ -114,6 +114,9 @@ projects. The task detail's **Lane** field assigns or unassigns a task. Lane and
 label filters combine. Archived lanes remain searchable and viewable.
 
 Lifecycle edits preserve task statuses, attached threads, labels, and memberships.
+Archiving waits until the lane holds no open task: the archive is refused with
+the open tasks listed (`open_tasks`) until they are moved or finished. A task
+whose status cannot be read counts as open. Parking needs no move.
 An active lane is organizational state; **working now** derives from attached
 task threads actually starting or working. Missing/unloaded task rows are counted
 as unavailable, never silently deleted. Even a confirmed deleted task retains its
@@ -140,6 +143,24 @@ pull bounded deltas or reset to a lane snapshot after falling behind. Every
 reconnect takes an authoritative lane snapshot so restored backups with reused
 version numbers cannot leave stale lane data visible. Lane-only
 edits do not reload the task board or its descriptions.
+
+### Archive guard for worker and operator threads
+
+BB core archives a thread and its children without asking plugins, so agents
+archive through `bb better-tasks thread archive --input '{"threadId":"THREAD_ID"}'`.
+It refuses (exit 1, JSON on stdout) while the thread or any unarchived child is
+attached to an open task, or owns an unarchived lane with open tasks. Move,
+finish or detach those tasks first. `thread check` reports the same without
+archiving. The check scans open tasks and their attached threads; a task
+attached between the check and the archive is not caught.
+
+### Release stage
+
+Each task may carry a release stage: `merged-dev`, `nominated`, `boarded`,
+`go`, `live`, `verified`. Train tooling (writer `marco-train`) records it with
+`bb better-tasks release set`; the board shows it read-only in the task detail.
+The stage never changes the task status, and status edits never change the
+stage. See [the release skill](skills/release/SKILL.md).
 
 ### Importing existing lane labels
 
@@ -182,7 +203,8 @@ to the plugin's `data.db`, through `bb.storage.database()` and
 `bb.storage.migrate()`. No core Tasks database access or automatic live-data
 migration occurs. Restart restores lane records, memberships, revisions, recent
 changes, pending previews, and committed import receipts. The last 1,000 lane
-changes are retained; older readers receive a snapshot reset.
+changes are retained; older readers receive a snapshot reset. Release stages,
+their full write history and write receipts live in the same database.
 
 Before an authorized upgrade/uninstall, take a consistent SQLite backup of
 `<BB data dir>/plugins/better-tasks/data.db` using SQLite's backup facility.
@@ -207,6 +229,8 @@ This feature PR does not authorize a live installation or migration.
 | `lib/feed.ts` | The realtime socket, filtered to Tasks signals, with reconnect |
 | `lib/store.ts` | The page's copy of the board; merges snapshots and deltas by revision |
 | `lib/view.ts` | Filtering, sorting and grouping |
+| `lib/release/` | Release stage model, storage, train-only CLI writes |
+| `lib/guards.ts`, `lib/guard-cli.ts` | Lane and thread archive guards |
 | `lib/virtual.ts`, `components/virtual-list.tsx` | Windowing |
 | `app.tsx`, `components/` | The page |
 

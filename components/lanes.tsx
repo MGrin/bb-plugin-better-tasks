@@ -533,7 +533,7 @@ function LaneManager({
               </p>
               <p className="text-xs text-muted-foreground">
                 Parking and archiving preserve memberships, task statuses, and
-                running threads.
+                running threads. Archiving waits until no open task remains.
               </p>
             </>
           ) : null}

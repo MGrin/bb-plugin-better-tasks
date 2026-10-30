@@ -114,6 +114,9 @@ projects. The task detail's **Lane** field assigns or unassigns a task. Lane and
 label filters combine. Archived lanes remain searchable and viewable.
 
 Lifecycle edits preserve task statuses, attached threads, labels, and memberships.
+Archiving waits until the lane holds no open task: the archive is refused with
+the open tasks listed (`open_tasks`) until they are moved or finished. A task
+whose status cannot be read counts as open. Parking needs no move.
 An active lane is organizational state; **working now** derives from attached
 task threads actually starting or working. Missing/unloaded task rows are counted
 as unavailable, never silently deleted. Even a confirmed deleted task retains its
@@ -140,6 +143,16 @@ pull bounded deltas or reset to a lane snapshot after falling behind. Every
 reconnect takes an authoritative lane snapshot so restored backups with reused
 version numbers cannot leave stale lane data visible. Lane-only
 edits do not reload the task board or its descriptions.
+
+### Archive guard for worker and operator threads
+
+BB core archives a thread and its children without asking plugins, so agents
+archive through `bb better-tasks thread archive --input '{"threadId":"THREAD_ID"}'`.
+It refuses (exit 1, JSON on stdout) while the thread or any unarchived child is
+attached to an open task, or owns an unarchived lane with open tasks. Move,
+finish or detach those tasks first. `thread check` reports the same without
+archiving. The check scans open tasks and their attached threads; a task
+attached between the check and the archive is not caught.
 
 ### Release stage
 
@@ -217,6 +230,7 @@ This feature PR does not authorize a live installation or migration.
 | `lib/store.ts` | The page's copy of the board; merges snapshots and deltas by revision |
 | `lib/view.ts` | Filtering, sorting and grouping |
 | `lib/release/` | Release stage model, storage, train-only CLI writes |
+| `lib/guards.ts`, `lib/guard-cli.ts` | Lane and thread archive guards |
 | `lib/virtual.ts`, `components/virtual-list.tsx` | Windowing |
 | `app.tsx`, `components/` | The page |
 

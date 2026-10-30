@@ -17,8 +17,12 @@ import { releaseReadSchema, type ReleaseReply } from "../release/model.ts";
 import { ReleaseRepository } from "../release/repository.ts";
 import { ReleaseService } from "../release/service.ts";
 import { releaseCommands } from "../release/cli.ts";
+import { threadHoldings, type ThreadGuardAdapters } from "../guards.ts";
+import { threadCommands } from "../guard-cli.ts";
 
-export type BackendAdapters = LaneAdapters & ImportAdapters;
+export type BackendAdapters = LaneAdapters &
+  ImportAdapters &
+  Omit<ThreadGuardAdapters, "ownedLanes">;
 
 export const laneRpcMethods = {
   laneImportPreview: {
@@ -72,9 +76,21 @@ export function laneBackend(bb: BbPluginApi, adapters: BackendAdapters) {
   const releases = new ReleaseService(new ReleaseRepository(db), adapters, (taskId) =>
     bb.realtime.publish(CHANNEL_TOUCHED, { taskId, what: "release" }),
   );
+  const guard: ThreadGuardAdapters = {
+    ...adapters,
+    ownedLanes: (threadId) =>
+      repo
+        .list()
+        .filter((l) => l.ownerThreadId === threadId && l.state !== "archived")
+        .map((l) => ({ id: l.id, name: l.name, taskIds: repo.memberIds(l.id) })),
+  };
   bb.cli.register(
     laneCli(service, importer, {
       ...releaseCommands(releases),
+      ...threadCommands({
+        holdings: (threadId) => threadHoldings(threadId, guard),
+        archive: (threadId) => bb.sdk.threads.archive({ threadId }),
+      }),
     }),
   );
   // These observe-only listeners are disposed by the host with this generation.

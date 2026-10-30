@@ -22,7 +22,7 @@ bb better-tasks lane restore --input '{"id":"LANE_ID","expectedRevision":3}'
 bb better-tasks lane owner --input '{"threadId":"THREAD_ID"}'
 ```
 
-Parking uses `update` with `patch:{"state":"parked"}`. Archiving preserves memberships and unfinished tasks; restore before new assignment. Restore returns the lane to active. Owner IDs survive archived, missing, or unavailable threads; no automatic replacement occurs.
+Parking uses `update` with `patch:{"state":"parked"}`. Archiving is refused with `code:"open_tasks"` and exit 1 while any member task is open or unreadable; move or finish them, then retry with the same revision. Archiving preserves memberships; restore before new assignment. Restore returns the lane to active. Owner IDs survive archived, missing, or unavailable threads; no automatic replacement occurs.
 
 Assignment revisions belong to each task's membership, not the lane or core task. Missing membership starts at revision 0. Unassignment retains a tombstone revision. Read the current membership or tombstone with `lane membership --input '{"taskId":"STABLE_TASK_ID"}'` before reassigning. The typed `laneSnapshot` RPC also includes tombstones.
 
@@ -38,6 +38,17 @@ Create destination lanes first. Map each project/label ID explicitly, even when 
 Apply rejects changed source labels, task identity/labels, lane revisions, or memberships. Preview expires after 24 hours. After a lost response, retry the exact preview ID and resolutions: its durable receipt returns the previous result before reading sources or replaying writes. Changing resolutions for a committed receipt fails.
 
 No continuous label inference or dual-write follows import. Existing `marco tasks --lane` still edits labels; adopting this API there is separate work. Lane data lives in this plugin's supported SQLite storage; back it up consistently before uninstall or migration. Never access the core Tasks database.
+
+## Archiving a worker or operator thread
+
+Never archive a thread that still holds open work. Use the guarded command instead of `bb thread archive`:
+
+```sh
+bb better-tasks thread check --input '{"threadId":"THREAD_ID"}'
+bb better-tasks thread archive --input '{"threadId":"THREAD_ID"}'
+```
+
+Both cover the thread and its unarchived children, because archive takes them all. Exit 1 with `holdings` JSON lists `attachedTasks` (open tasks attached to one of those threads) and `ownedLanes` (unarchived lanes they own with open tasks). Move, finish or detach them, then retry. Exit 0 from `archive` returns `archivedThreadIds`.
 
 ## Coherent observation and attributable transfer
 

@@ -1,12 +1,17 @@
 // Keeps a TaskCache in step with the Tasks plugin through its public RPC.
 //
 // Load once (open work first, then closed, then who is working on what),
-// then patch one task at a time as the Tasks plugin announces changes. A
-// full reload happens only when the change feed reconnects, because only
-// then could an announcement have been missed.
+// then patch one task at a time as the Tasks plugin announces changes.
+//
+// Announcements can be missed: the feed reconnects, the Tasks plugin
+// restarts, a read fails, or a subscription dies without closing. Each of
+// those marks the cache stale, and the supervisor (lib/supervisor.ts) runs a
+// full reload. A reload diffs against the cache, so it doubles as the
+// periodic reconcile: it reports how many rows the feed failed to deliver.
 import { TaskCache, type TaskFields } from "./cache.ts";
 import {
   CHANNEL_DELTA,
+  CHANNEL_HEALTH,
   CHANNEL_META,
   CHANNEL_OPEN_COUNT,
   CHANNEL_TOUCHED,
@@ -14,12 +19,15 @@ import {
   OPEN_STATUSES,
   type Changes,
   type DeltaSignal,
+  type SyncHealth,
   type OpenCountSignal,
   type Label,
   type LiveThread,
   type Project,
   type Status,
 } from "./model.ts";
+
+export type { SyncHealth };
 
 export interface TaskThreadFields {
   threadId: string;
@@ -51,6 +59,10 @@ export interface SyncStats {
   cursorRestarts: number;
   failedLoads: number;
   untargetedSignals: number;
+  /** Rows the last full load changed or removed that no signal explained. */
+  lastDrift: number;
+  /** Sum of `lastDrift` over every reload after the first. */
+  driftRepaired: number;
   lastFlushMs: number;
   lastFullLoadMs: number;
   openReadyMs: number | null;
@@ -107,6 +119,8 @@ export class TaskSync {
     cursorRestarts: 0,
     failedLoads: 0,
     untargetedSignals: 0,
+    lastDrift: 0,
+    driftRepaired: 0,
     lastFlushMs: 0,
     lastFullLoadMs: 0,
     openReadyMs: null,
@@ -134,17 +148,27 @@ export class TaskSync {
   #touchedDuringLoad: Set<string> | null = null;
   #loading: Promise<void> | null = null;
   #reloadQueued = false;
+  readonly #now: () => number;
+  #staleSince: number | null;
+  #staleReason: string | null = "loading";
+  #syncedAt: number | null = null;
+  /** Bumps on every markStale; a load clears staleness only if it did not move. */
+  #staleEpoch = 0;
+  readonly #staleListeners = new Set<() => void>();
 
   constructor(options: {
     api: TasksApi;
     publish: (channel: string, payload: unknown) => void;
     debounceMs?: number;
     log?: (message: string) => void;
+    now?: () => number;
   }) {
     this.#api = options.api;
     this.#publish = options.publish;
     this.#debounceMs = options.debounceMs ?? 25;
     this.#log = options.log ?? (() => {});
+    this.#now = options.now ?? Date.now;
+    this.#staleSince = this.#now();
     this.openReady = new Promise((resolve) => (this.#resolveOpen = resolve));
     this.allReady = new Promise((resolve) => (this.#resolveAll = resolve));
   }
@@ -168,6 +192,9 @@ export class TaskSync {
           this.#reloadQueued = false;
           await this.fullLoad();
         } while (this.#reloadQueued && !this.#disposed);
+      } catch (error) {
+        this.markStale(`full load failed: ${String(error)}`);
+        throw error;
       } finally {
         this.#loading = null;
       }
@@ -177,36 +204,98 @@ export class TaskSync {
 
   /**
    * Read every task. The first call resolves `openReady` as soon as open work
-   * is cached; later calls (a feed reconnect) diff against the cache and drop
-   * tasks that no longer exist.
+   * is cached; later calls (a reconnect, a reconcile) diff against the cache
+   * and drop tasks that no longer exist. Returns the drift: rows this load
+   * changed or removed that no signal during the load explained.
    */
-  async fullLoad(): Promise<void> {
+  async fullLoad(): Promise<number> {
     const started = performance.now();
+    const epoch = this.#staleEpoch;
+    const firstLoad = !this.#loaded;
     this.stats.fullLoads += 1;
     const seen = new Set<string>();
+    const changed = new Set<string>();
+    let drift = 0;
     this.#touchedDuringLoad = new Set();
     try {
       await this.loadMeta();
-      await this.#readPages({ statuses: [...OPEN_STATUSES] }, seen);
+      await this.#readPages({ statuses: [...OPEN_STATUSES] }, seen, changed);
       if (this.stats.openReadyMs === null) {
         this.stats.openReadyMs = performance.now() - started;
       }
       this.#openLoaded = true;
       this.#resolveOpen();
       this.#publishChanges();
-      await this.#readPages({ statuses: [...CLOSED_STATUSES] }, seen);
+      await this.#readPages({ statuses: [...CLOSED_STATUSES] }, seen, changed);
       await this.#loadLive();
       const touched = this.#touchedDuringLoad;
       for (const id of [...this.cache.ids()]) {
-        if (!seen.has(id) && !touched.has(id)) this.cache.remove(id);
+        if (!seen.has(id) && !touched.has(id) && this.cache.remove(id)) changed.add(id);
+      }
+      for (const id of changed) {
+        if (!touched.has(id) && !this.#taskQueue.has(id)) drift += 1;
       }
     } finally {
       this.#touchedDuringLoad = null;
     }
     this.#loaded = true;
     this.stats.lastFullLoadMs = performance.now() - started;
+    this.stats.lastDrift = firstLoad ? 0 : drift;
+    if (!firstLoad) this.stats.driftRepaired += drift;
     this.#resolveAll();
     this.#publishChanges();
+    if (this.#staleEpoch === epoch) this.#markFresh();
+    else this.#syncedAt = this.#now();
+    return this.stats.lastDrift;
+  }
+
+  /** What the board shows about how current the cache is. */
+  health(): SyncHealth {
+    const iso = (time: number | null) => (time === null ? null : new Date(time).toISOString());
+    return {
+      staleSince: iso(this.#staleSince),
+      reason: this.#staleReason,
+      syncedAt: iso(this.#syncedAt),
+    };
+  }
+
+  /**
+   * Record that the cache may have missed changes, and wake the supervisor
+   * to reload. The first reason and time of an episode are kept.
+   */
+  markStale(reason: string): void {
+    if (this.#disposed) return;
+    this.#staleEpoch += 1;
+    if (this.#staleSince === null) {
+      this.#staleSince = this.#now();
+      this.#staleReason = reason;
+      this.#log(`cache stale: ${reason}`);
+      this.#publishHealth();
+    }
+    for (const listener of [...this.#staleListeners]) listener();
+  }
+
+  /** Call `listener` on every `markStale`; returns the unsubscribe. */
+  onStale(listener: () => void): () => void {
+    this.#staleListeners.add(listener);
+    return () => this.#staleListeners.delete(listener);
+  }
+
+  #markFresh(): void {
+    const now = this.#now();
+    this.#syncedAt = now;
+    const since = this.#staleSince;
+    const reason = this.#staleReason;
+    this.#staleSince = null;
+    this.#staleReason = null;
+    if (since !== null && reason !== "loading") {
+      this.#log(`cache back in step after ${Math.round((now - since) / 1000)} s (${reason})`);
+    }
+    this.#publishHealth();
+  }
+
+  #publishHealth(): void {
+    this.#publish(CHANNEL_HEALTH, this.health());
   }
 
   async loadMeta(): Promise<void> {
@@ -287,6 +376,8 @@ export class TaskSync {
 
   dispose(): void {
     this.#disposed = true;
+    for (const listener of [...this.#staleListeners]) listener();
+    this.#staleListeners.clear();
     if (this.#timer !== null) clearTimeout(this.#timer);
     this.#timer = null;
   }
@@ -308,6 +399,8 @@ export class TaskSync {
     const started = performance.now();
     const tasks = [...this.#taskQueue];
     const threads = [...this.#threadQueue];
+    // A load running now may read these rows first; they are not drift.
+    for (const id of tasks) this.#touchedDuringLoad?.add(id);
     this.#taskQueue.clear();
     this.#threadQueue.clear();
     const run = async () => {
@@ -318,7 +411,7 @@ export class TaskSync {
           if (task === null) this.cache.remove(taskId);
           else this.cache.upsert(task);
         } catch (error) {
-          this.#log(`getTask ${taskId} failed: ${String(error)}`);
+          this.markStale(`getTask ${taskId} failed: ${String(error)}`);
         }
       });
       await eachLimited(threads, CONCURRENCY, async (taskId) => {
@@ -327,7 +420,7 @@ export class TaskSync {
         try {
           this.cache.setLive(taskId, liveOnly(await this.#api.listTaskThreads(taskId)));
         } catch (error) {
-          this.#log(`listTaskThreads ${taskId} failed: ${String(error)}`);
+          this.markStale(`listTaskThreads ${taskId} failed: ${String(error)}`);
         }
         this.#publish(CHANNEL_TOUCHED, { taskId, what: "threads" });
       });
@@ -341,11 +434,15 @@ export class TaskSync {
     await this.#flushing;
   }
 
-  async #readPages(filter: { statuses: Status[] }, seen: Set<string>): Promise<void> {
+  async #readPages(
+    filter: { statuses: Status[] },
+    seen: Set<string>,
+    changed: Set<string>,
+  ): Promise<void> {
     await this.#paginate(filter, (tasks) => {
       for (const task of tasks) {
         seen.add(task.id);
-        this.cache.upsert(task);
+        if (this.cache.upsert(task)) changed.add(task.id);
       }
     });
   }

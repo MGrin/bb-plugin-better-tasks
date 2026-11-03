@@ -108,3 +108,24 @@ test("a feed reconnect triggers a reload", async (t) => {
   await until(matches);
   assert.equal(sync.health().staleSince, null);
 });
+
+test("a task written on bb 0.48 reaches the cache from its RPC invalidation, with no reconcile", async (t) => {
+  // The timed reconcile never runs here: only the feed can deliver the change.
+  const { fake, server, sync, logs, stop } = boot({ intervalMs: 60_000 });
+  t.after(stop);
+  const item = task();
+  fake.add(item);
+  await until(() => sync.loaded && sync.health().staleSince === null);
+  const loads = sync.stats.fullLoads;
+  const added = task();
+
+  fake.tasks.set(item.id, { ...item, status: "in_review" });
+  server.pluginChanged("tasks", [`task:${item.id}`, "tasks", `tasks:${item.projectId}`]);
+  fake.add(added);
+  server.pluginChanged("tasks", [`task:${added.id}`, "tasks", `tasks:${added.projectId}`]);
+
+  await until(() => sync.cache.get(item.id)?.status === "in_review" && sync.cache.get(added.id) !== undefined);
+  assert.equal(sync.stats.fullLoads, loads, "targeted reads only, no full reload");
+  assert.equal(sync.stats.signalsReceived, 2);
+  assert.ok(!logs.some((line) => /reconcile repaired/.test(line)));
+});

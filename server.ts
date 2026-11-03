@@ -1,7 +1,8 @@
 // better-tasks — server entry.
 //
 // Holds every task in memory as a compact row (no description), kept current
-// one task at a time from the Tasks plugin's own change signals, and serves
+// one task at a time from the Tasks plugin's own change notifications (its
+// RPC invalidations, heard on bb's realtime socket), and serves
 // the board page over RPC. All reads and writes go through the Tasks
 // plugin's public RPC; nothing here touches its database.
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
@@ -279,7 +280,7 @@ export default function plugin(bb: BbPluginApi) {
     },
   });
 
-  // Keep current from the Tasks plugin's own signals; reload whenever they
+  // Keep current from the Tasks plugin's own invalidations; reload whenever they
   // may have been missed, and reconcile on a timer in case they stop quietly.
   const feed = new FeedControl();
   const log = {

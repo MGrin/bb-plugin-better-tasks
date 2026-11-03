@@ -1,15 +1,23 @@
 // The change feed: one WebSocket to bb's own realtime endpoint
-// (`bb.server.loopbackBaseUrl` + `/ws`), filtered to the Tasks plugin's
-// signals. A plugin's `useRealtime` only hears its own plugin's channels, so
-// this is how another plugin learns which task changed.
+// (`bb.server.loopbackBaseUrl` + `/ws`), subscribed to the Tasks plugin. A
+// plugin's `useRealtime` only hears its own plugin's channels, so this is how
+// another plugin learns which task changed.
 //
-// bb broadcasts plugin signals to every socket, and announces a plugin's
-// dispose and load to sockets subscribed to that plugin. The feed subscribes
-// to the Tasks plugin so a restart of it is heard, pings the server and
-// drops a socket that stops answering, and can be told to reconnect.
+// The Tasks plugin in bb 0.48 publishes no plugin signals. Every write calls
+// `bb.rpc.experimental_invalidate(tags)`, and bb sends that only to sockets
+// subscribed to the plugin, as `{type: "changed", entity: "plugin",
+// pluginId: "tasks", tags}`; `tags: null` is the plugin's dispose or load.
+// The feed turns those tags into task signals (MARCO-406, probe 2026-11-03),
+// still accepts `plugin-signal` frames from a Tasks plugin that sends them,
+// pings the server, drops a socket that stops answering, and can be told to
+// reconnect.
 
 export interface FeedHandlers {
-  /** Every plugin signal the Tasks plugin publishes. */
+  /**
+   * One task change: `tasks:changed`, `threads:changed` or `comments:changed`
+   * with `{ taskId }`, `tasks:changed` with `{}` when no task is named, or
+   * `projects:changed`.
+   */
   onSignal(channel: string, payload: unknown): void;
   /** Fired on every successful connect; `reconnected` is false the first time. */
   onOpen(reconnected: boolean): void;
@@ -80,33 +88,74 @@ function parse(data: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** Parse one realtime frame; returns the Tasks signal or null. */
-export function parseTasksSignal(
-  data: unknown,
-  pluginId = "tasks",
-): { channel: string; payload: unknown } | null {
-  const message = parse(data);
-  if (message === null) return null;
-  const { type, pluginId: from, channel, payload } = message;
-  if (type !== "plugin-signal" || from !== pluginId || typeof channel !== "string") {
-    return null;
+/** The tag list of a plugin's `changed` frame: null for a restart, undefined if not one. */
+function pluginChange(
+  message: Record<string, unknown>,
+  pluginId: string,
+): readonly string[] | null | undefined {
+  if (message.type !== "changed" || message.entity !== "plugin" || message.pluginId !== pluginId) {
+    return undefined;
   }
-  return { channel, payload };
+  if (message.tags === null) return null;
+  return Array.isArray(message.tags)
+    ? message.tags.filter((tag): tag is string => typeof tag === "string")
+    : undefined;
+}
+
+export interface TasksSignal {
+  channel: string;
+  payload: unknown;
+}
+
+function idsAfter(tags: readonly string[], prefix: string): string[] {
+  return tags.filter((tag) => tag.startsWith(prefix)).map((tag) => tag.slice(prefix.length));
 }
 
 /**
- * Whether a frame announces the plugin's dispose or load. `tags: null` is
- * the whole plugin; a tag list is only an RPC cache invalidation.
+ * Turn one Tasks plugin RPC invalidation into the narrowest task signals.
+ * Its tags (bb 0.48 Tasks server): `task:<id>` for a task written,
+ * `threads:<taskId>` and `comments:<taskId>` for its threads and comments,
+ * `tasks` and `tasks:<projectId>` for task lists, `projects`,
+ * `project:<id>` and `labels:<projectId>` for metadata. A write to named
+ * tasks also lists `tasks` and often `projects`; only a frame without any
+ * `task:` tag means a change that no task id covers.
  */
-export function isPluginRestart(data: unknown, pluginId = "tasks"): boolean {
+export function tasksSignalsFromTags(tags: readonly string[]): TasksSignal[] {
+  const signals: TasksSignal[] = [];
+  const add = (channel: string, ids: string[]) => {
+    for (const taskId of new Set(ids)) signals.push({ channel, payload: { taskId } });
+  };
+  const tasks = idsAfter(tags, "task:");
+  add("tasks:changed", tasks);
+  add("threads:changed", idsAfter(tags, "threads:"));
+  add("comments:changed", idsAfter(tags, "comments:"));
+  if (tasks.length > 0) return signals;
+  if (tags.some((tag) => tag === "tasks" || tag.startsWith("tasks:"))) {
+    signals.push({ channel: "tasks:changed", payload: {} });
+  }
+  if (tags.some((tag) => tag === "projects" || tag.startsWith("labels:"))) {
+    signals.push({ channel: "projects:changed", payload: {} });
+  }
+  return signals;
+}
+
+/** Everything one realtime frame means for the Tasks plugin. */
+export function readTasksFrame(
+  data: unknown,
+  pluginId = "tasks",
+): { signals: TasksSignal[]; restart: boolean } {
   const message = parse(data);
-  return (
-    message !== null &&
-    message.type === "changed" &&
-    message.entity === "plugin" &&
+  if (message === null) return { signals: [], restart: false };
+  if (
+    message.type === "plugin-signal" &&
     message.pluginId === pluginId &&
-    message.tags === null
-  );
+    typeof message.channel === "string"
+  ) {
+    return { signals: [{ channel: message.channel, payload: message.payload }], restart: false };
+  }
+  const tags = pluginChange(message, pluginId);
+  if (tags === null) return { signals: [], restart: true };
+  return { signals: tags === undefined ? [] : tasksSignalsFromTags(tags), restart: false };
 }
 
 const SUBSCRIBE = JSON.stringify({
@@ -132,7 +181,7 @@ export async function runFeed(
   let attempt = 0;
   let connectedBefore = false;
   // An older bb without plugin subscriptions closes the socket on the frame;
-  // the signal feed works without it, so stop sending it.
+  // its Tasks plugin's broadcast signals still arrive, so stop sending it.
   let subscribe = true;
   while (!signal.aborted) {
     const opened = await new Promise<boolean>((resolve) => {
@@ -188,9 +237,9 @@ export async function runFeed(
       };
       socket.onmessage = (event) => {
         lastFrame = Date.now();
-        const parsed = parseTasksSignal(event.data);
-        if (parsed !== null) handlers.onSignal(parsed.channel, parsed.payload);
-        else if (isPluginRestart(event.data)) handlers.onTasksPluginChanged?.();
+        const frame = readTasksFrame(event.data);
+        if (frame.restart) handlers.onTasksPluginChanged?.();
+        for (const { channel, payload } of frame.signals) handlers.onSignal(channel, payload);
       };
       socket.onerror = () => handlers.log?.("change feed socket error");
       socket.onclose = (event) => finish(event.code);

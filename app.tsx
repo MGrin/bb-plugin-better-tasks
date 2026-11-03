@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { DetailPane } from "@/components/detail-pane";
 import { SidebarOpenCount } from "@/components/sidebar-count";
 import { cn } from "@/lib/utils";
+import { staleNotice } from "@/lib/format";
 import { STATUS_MENU_ORDER } from "@/components/menus";
 import {
   ActionsContext,
@@ -107,7 +108,8 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
   const pluginId = experimental_usePluginId();
   const storageKey = `${pluginId}:ui:v1`;
   const navigate = useBbNavigate();
-  const { rpc, store, revision, metrics, error, retry } = useBoard();
+  const { rpc, store, revision, metrics, error, retry, health } = useBoard();
+  const stale = staleNotice(health);
   const lanes = useLanes();
   const [ui, setUi] = useState<UiState>(() => readUi(storageKey));
   const [lanesOpen, setLanesOpen] = useState(false);
@@ -438,6 +440,11 @@ function BoardPage({ subPath }: PluginNavPanelProps) {
             onHelp={() => setHelpOpen(true)}
           />
           <LaneNavigation open={lanesOpen} onOpenChange={setLanesOpen} labels={store.labels} projects={store.projects} sourcesLoading={store.version < 0} controller={lanes} filters={filters} onFilters={setFilters} rows={store.rows} complete={store.closedLoaded}/>
+          {stale !== null ? (
+            <div role="status" data-better-tasks-stale="" className="border-b border-border bg-state-hover px-4 py-1.5 text-xs text-muted-foreground">
+              {stale}
+            </div>
+          ) : null}
           <div className="@container/body flex min-h-0 flex-1">
             <main
               className={cn("@container/list flex min-w-0 flex-1 flex-col", detailOpen && "@max-[720px]/body:hidden")}

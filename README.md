@@ -63,8 +63,12 @@ running, arrives in bursts every few seconds. Better Tasks does the opposite:
    publishes nothing.
 3. **Nothing is refetched wholesale.** The page applies deltas by row
    revision, so ordering does not matter; if it ever misses one (a reconnect),
-   it pulls just the changes since its version. A full re-read happens only on
-   the server, and only when its feed reconnects.
+   it pulls just the changes since its version. Full re-reads happen only on
+   the server: when its feed reconnects, when bb reports a Tasks plugin
+   restart, after a failed read, and as a reconcile every 10 minutes. A
+   reconcile rewrites only rows that differ. If it finds changes the feed
+   never delivered, the server logs that and reconnects the feed. A server cache
+   behind for over a minute shows a "may be out of date since" line on the page.
 4. **Virtualized rendering.** The list and every board column render only the
    rows on screen. Rows are memoized on the row object, so a delta re-renders
    exactly the rows it touched.
@@ -223,10 +227,11 @@ This feature PR does not authorize a live installation or migration.
 
 | Path | What it is |
 |---|---|
-| `server.ts` | Plugin server: Tasks RPC adapter, RPC contract, change-feed service |
+| `server.ts` | Plugin server: Tasks RPC adapter, RPC contract, change-feed and reconcile services |
 | `lib/sync.ts` | Loads the board and applies per-task changes to the cache |
 | `lib/cache.ts` | The versioned row cache and its change log |
-| `lib/feed.ts` | The realtime socket, filtered to Tasks signals, with reconnect |
+| `lib/feed.ts` | The realtime socket, filtered to Tasks signals; idle watchdog, reconnect, Tasks plugin restart notices |
+| `lib/supervisor.ts` | Reloads a stale cache with backoff and reconciles on a timer |
 | `lib/store.ts` | The page's copy of the board; merges snapshots and deltas by revision |
 | `lib/view.ts` | Filtering, sorting and grouping |
 | `lib/release/` | Release stage model, storage, train-only CLI writes |

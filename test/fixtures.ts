@@ -33,6 +33,12 @@ export class FakeTasks implements TasksApi {
   calls: string[] = [];
   /** Reject the next N cursor-bearing listTasks calls the way the Tasks plugin does. */
   staleCursors = 0;
+  /** While true every call fails the way bb answers for a plugin that is restarting. */
+  down = false;
+
+  #check(): void {
+    if (this.down) throw new Error('HTTP 503: plugin "tasks" is not running (status: starting)');
+  }
 
   add(...tasks: TaskFields[]): void {
     for (const item of tasks) this.tasks.set(item.id, item);
@@ -45,6 +51,7 @@ export class FakeTasks implements TasksApi {
     cursor?: string;
   }) {
     this.calls.push("listTasks");
+    this.#check();
     if (input.cursor !== undefined && this.staleCursors > 0) {
       this.staleCursors -= 1;
       throw new Error(
@@ -68,16 +75,19 @@ export class FakeTasks implements TasksApi {
 
   async getTask(taskId: string) {
     this.calls.push("getTask");
+    this.#check();
     return this.tasks.get(taskId) ?? null;
   }
 
   async listTaskThreads(taskId: string) {
     this.calls.push("listTaskThreads");
+    this.#check();
     return this.threads.get(taskId) ?? [];
   }
 
   async listProjects() {
     this.calls.push("listProjects");
+    this.#check();
     return [{ id: "01PROJECTDEMO0000000000000", name: "Demo", prefix: "DEMO", color: "blue" }];
   }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DeltaSignal } from "../lib/model.ts";
-import { TaskSync } from "../lib/sync.ts";
+import { TaskSync, type SyncHealth } from "../lib/sync.ts";
 import { FakeTasks, task } from "./fixtures.ts";
 
 function setup() {
@@ -168,4 +168,85 @@ test("the open count matches the native badge and is announced only when it move
   sync.onSignal("tasks:changed", { taskId: child.id });
   await sync.settle();
   assert.deepEqual(counts(), [3, 2]);
+});
+
+const healthOf = (published: { channel: string; payload: unknown }[]) =>
+  published.filter((entry) => entry.channel === "health").map((entry) => entry.payload as SyncHealth);
+
+test("the cache is stale until the first load, then fresh with a sync time", async () => {
+  const { fake, sync, published } = setup();
+  fake.add(task());
+  assert.equal(sync.health().reason, "loading");
+  assert.ok(sync.health().staleSince !== null);
+  await sync.fullLoad();
+  assert.equal(sync.health().staleSince, null);
+  assert.ok(sync.health().syncedAt !== null);
+  assert.equal(healthOf(published).at(-1)?.staleSince, null);
+});
+
+test("a reload counts the rows the change feed missed and repairs them", async () => {
+  const { fake, sync } = setup();
+  const changed = task();
+  const gone = task();
+  const same = task();
+  fake.add(changed, gone, same);
+  await sync.fullLoad();
+  // Changes with no signal, as when the subscription was silently lost.
+  fake.tasks.set(changed.id, { ...changed, status: "done", updatedAt: "2026-01-02T00:00:00.000Z" });
+  fake.tasks.delete(gone.id);
+  const added = task();
+  fake.add(added);
+  assert.equal(await sync.fullLoad(), 3);
+  assert.equal(sync.cache.get(changed.id)?.status, "done");
+  assert.equal(sync.cache.get(gone.id), undefined);
+  assert.ok(sync.cache.get(added.id));
+  assert.equal(await sync.fullLoad(), 0, "an unchanged board shows no drift");
+});
+
+test("a change announced on the feed during a reload is not counted as drift", async () => {
+  const { fake, sync } = setup();
+  const item = task();
+  fake.add(item);
+  await sync.fullLoad();
+  fake.tasks.set(item.id, { ...item, title: "Renamed" });
+  sync.onSignal("tasks:changed", { taskId: item.id });
+  assert.equal(await sync.fullLoad(), 0);
+  await sync.settle();
+  assert.equal(sync.cache.get(item.id)?.title, "Renamed");
+});
+
+test("a failed read marks the cache stale and wakes the supervisor; a later load clears it", async () => {
+  const { fake, sync, published } = setup();
+  const item = task();
+  fake.add(item);
+  await sync.fullLoad();
+  let woke = 0;
+  const unsubscribe = sync.onStale(() => (woke += 1));
+  fake.down = true;
+  sync.onSignal("tasks:changed", { taskId: item.id });
+  await sync.settle();
+  unsubscribe();
+  assert.equal(woke, 1);
+  assert.match(sync.health().reason ?? "", /getTask .* failed/);
+  await assert.rejects(sync.requestFullLoad(), /not running/);
+  assert.ok(sync.health().staleSince !== null, "still stale after a failed load");
+  fake.down = false;
+  await sync.requestFullLoad();
+  assert.equal(sync.health().staleSince, null);
+  assert.deepEqual(
+    healthOf(published).map((health) => health.staleSince === null),
+    [true, false, true],
+  );
+});
+
+test("staleness reported during a load survives that load", async () => {
+  const { fake, sync } = setup();
+  fake.add(task());
+  await sync.fullLoad();
+  const load = sync.fullLoad();
+  sync.markStale("change feed reconnected");
+  await load;
+  assert.equal(sync.health().reason, "change feed reconnected");
+  await sync.fullLoad();
+  assert.equal(sync.health().staleSince, null);
 });

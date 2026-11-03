@@ -1,13 +1,14 @@
 // The page's data: one ClientStore per page load, filled open-work-first
 // and kept current by the server's delta signals.
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   useRealtime,
   useRealtimeConnectionState,
   useRpc,
 } from "@get-bb/plugin-sdk/app";
 import type { rpcContract } from "../server";
-import type { DeltaSignal, Label, Project } from "@/lib/model";
+import { CHANNEL_HEALTH, type DeltaSignal, type Label, type Project, type SyncHealth } from "@/lib/model";
+import { staleNoticeAt } from "@/lib/format";
 import { ClientStore, type Snapshot } from "@/lib/store";
 
 type Rpc = ReturnType<typeof useRpc<typeof rpcContract>>;
@@ -43,6 +44,18 @@ const metrics: BoardMetrics = {
 };
 let loading: Promise<void> | null = null;
 let error: string | null = null;
+/** The server cache's own staleness; null until first heard. */
+let health: SyncHealth | null = null;
+
+function setHealth(next: SyncHealth): void {
+  health = next;
+  store.touch();
+}
+
+function readHealth(rpc: Rpc): void {
+  // An older server has no health method; the board works without it.
+  void rpc.call("health", null).then(setHealth, () => {});
+}
 (globalThis as { __betterTasks?: unknown }).__betterTasks = metrics;
 
 let prefetched: Promise<Snapshot> | null = null;
@@ -147,6 +160,7 @@ export function useBoard() {
       // A revisit: catch up on what changed while the page was closed.
       void pull(rpc);
     }
+    readHealth(rpc);
   }, [rpc]);
 
   useEffect(() => {
@@ -155,8 +169,22 @@ export function useBoard() {
     // Signals are not replayed, so reconcile after every reconnect.
     if (previous !== "connected" && connection === "connected" && store.version >= 0) {
       void pull(rpc);
+      readHealth(rpc);
     }
   }, [connection, rpc]);
+
+  useRealtime(CHANNEL_HEALTH, (payload) => setHealth(payload as SyncHealth));
+
+  // Re-render when a pending stale notice becomes due.
+  const [, setTick] = useState(0);
+  const noticeAt = staleNoticeAt(health);
+  useEffect(() => {
+    if (noticeAt === null) return;
+    const delay = noticeAt - Date.now();
+    if (delay <= 0) return;
+    const timer = setTimeout(() => setTick((tick) => tick + 1), delay + 50);
+    return () => clearTimeout(timer);
+  }, [noticeAt]);
 
   useRealtime("delta", (payload) => {
     metrics.lastDeltaAt = performance.now();
@@ -171,5 +199,5 @@ export function useBoard() {
 
   const retry = useCallback(() => start(rpc), [rpc]);
 
-  return { rpc, store, revision, metrics, error, retry };
+  return { rpc, store, revision, metrics, error, retry, health };
 }

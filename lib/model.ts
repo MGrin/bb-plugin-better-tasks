@@ -106,6 +106,16 @@ export const CHANNEL_DELTA = "delta";
 export const CHANNEL_META = "meta";
 export const CHANNEL_TOUCHED = "touched";
 export const CHANNEL_OPEN_COUNT = "open-count";
+export const CHANNEL_HEALTH = "health";
+
+/** How current the server cache is; ISO times. */
+export interface SyncHealth {
+  /** When the cache may have started missing changes; null when in step. */
+  staleSince: string | null;
+  reason: string | null;
+  /** The last full load or reconcile that completed. */
+  syncedAt: string | null;
+}
 
 export interface OpenCountSignal {
   open: number;

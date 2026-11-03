@@ -45,3 +45,29 @@ const count = new Intl.NumberFormat();
 export function formatCount(value: number): string {
   return count.format(value);
 }
+
+const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+
+/** A cache behind for less than this is a normal reload; show nothing. */
+export const STALE_NOTICE_MS = 60_000;
+
+/** When a stale notice would appear, or null while the cache is in step. */
+export function staleNoticeAt(health: { staleSince: string | null } | null): number | null {
+  if (health === null || health.staleSince === null) return null;
+  const since = Date.parse(health.staleSince);
+  return Number.isNaN(since) ? null : since + STALE_NOTICE_MS;
+}
+
+/** The board's "stale since" line, or null when there is nothing to say yet. */
+export function staleNotice(
+  health: { staleSince: string | null; reason: string | null } | null,
+  now = Date.now(),
+): string | null {
+  const at = staleNoticeAt(health);
+  if (at === null || now < at) return null;
+  const since = new Date(Date.parse(health!.staleSince!));
+  const sameDay = since.toDateString() === new Date(now).toDateString();
+  const when = sameDay ? clock.format(since) : dateTime.format(since);
+  const why = health!.reason === null ? "" : ` (${health!.reason})`;
+  return `Tasks may be out of date since ${when}${why}. Reloading from the Tasks plugin.`;
+}

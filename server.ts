@@ -7,7 +7,8 @@
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import type { TaskFields } from "./lib/cache.ts";
-import { feedUrl, runFeed } from "./lib/feed.ts";
+import { FeedControl, feedUrl, runFeed } from "./lib/feed.ts";
+import { feedHandlers, superviseSync } from "./lib/supervisor.ts";
 import {
   PRIORITIES,
   STATUSES,
@@ -16,6 +17,7 @@ import {
   type Project,
   type Row,
   type Status,
+  type SyncHealth,
 } from "./lib/model.ts";
 import { TaskSync, type TasksApi, type TaskThreadFields } from "./lib/sync.ts";
 
@@ -25,6 +27,8 @@ import { MAX_SUBTREE } from "./lib/guards.ts";
 
 const TASKS_PLUGIN = "tasks";
 const CHILD_PAGE = 100;
+// A call to a Tasks plugin that never answers must not hold the sync forever.
+const RPC_TIMEOUT_MS = 30_000;
 
 export interface TaskDetail {
   task: TaskFields & { description: string };
@@ -96,6 +100,10 @@ export const rpcContract = defineRpcContract({
     input: z.object({ query: z.string().trim().min(2).max(200) }).strict(),
     output: z.object({ ids: z.array(z.string()), truncated: z.boolean() }),
   },
+  health: {
+    input: z.null(),
+    output: z.custom<SyncHealth>(),
+  },
   openCount: {
     input: z.null(),
     output: z.object({ open: z.number().int().nonnegative().nullable() }),
@@ -105,18 +113,6 @@ export const rpcContract = defineRpcContract({
     output: z.custom<Record<string, unknown>>(),
   },
 });
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(done, ms);
-    function done() {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", done);
-      resolve();
-    }
-    signal.addEventListener("abort", done, { once: true });
-  });
-}
 
 type TaskOrError =
   | { ok: true; task: TaskFields }
@@ -128,6 +124,7 @@ export default function plugin(bb: BbPluginApi) {
       pluginId: TASKS_PLUGIN,
       method,
       input: input as never,
+      signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
       // The Tasks plugin validates its own output; do not parse it twice.
       outputSchema: z.custom<T>(),
     });
@@ -265,6 +262,9 @@ export default function plugin(bb: BbPluginApi) {
         truncated: page.nextCursor !== null,
       };
     },
+    health() {
+      return sync.health();
+    },
     openCount() {
       return { open: sync.openCount };
     },
@@ -273,38 +273,31 @@ export default function plugin(bb: BbPluginApi) {
         version: sync.cache.version,
         size: sync.cache.size,
         loaded: sync.loaded,
+        ...sync.health(),
         ...sync.stats,
       };
     },
   });
 
-  // Load once, then keep current from the Tasks plugin's own signals.
+  // Keep current from the Tasks plugin's own signals; reload whenever they
+  // may have been missed, and reconcile on a timer in case they stop quietly.
+  const feed = new FeedControl();
+  const log = {
+    info: (message: string) => bb.log.info(message),
+    warn: (message: string) => bb.log.warn(message),
+    error: (message: string) => bb.log.error(message),
+  };
   bb.background.service("change-feed", {
     async start(signal) {
-      // A failed load (the Tasks plugin busy, restarting) retries with
-      // backoff rather than leaving the board half-read.
-      const load = async () => {
-        for (let attempt = 0; !signal.aborted; attempt += 1) {
-          try {
-            await sync.requestFullLoad();
-            return;
-          } catch (error) {
-            sync.stats.failedLoads += 1;
-            const delay = Math.min(30_000, 1_000 * 2 ** attempt);
-            bb.log.error(`full load failed, retrying in ${delay} ms: ${String(error)}`);
-            await sleep(delay, signal);
-          }
-        }
-      };
-      await runFeed(
-        feedUrl(bb.server.loopbackBaseUrl),
-        {
-          onSignal: (channel, payload) => sync.onSignal(channel, payload),
-          // First connect: the initial load. A reconnect: signals may have
-          // been missed while the socket was down, so diff everything once.
-          onOpen: () => void load(),
-          log: (message) => bb.log.info(message),
-        },
+      await runFeed(feedUrl(bb.server.loopbackBaseUrl), feedHandlers(sync, log), signal, {
+        control: feed,
+      });
+    },
+  });
+  bb.background.service("reconcile", {
+    async start(signal) {
+      await superviseSync(
+        { sync, log, onDrift: () => feed.reconnect("reconcile found missed changes") },
         signal,
       );
     },

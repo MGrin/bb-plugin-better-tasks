@@ -12,7 +12,7 @@ export function threadCommands(guard: {
   return {
     "thread check": cliCommand({
       summary:
-        "What archiving {threadId} would orphan: open tasks attached to it or its children, and open tasks of lanes they own. Blocked exits 1.",
+        "What archiving {threadId} would orphan: open tasks attached to it or its children, open tasks of lanes they own, and deferred train checks they own. Blocked exits 1.",
       options: input,
       async run({ options }) {
         const { threadId } = threadInput.parse(parseInput(options.input));
@@ -22,7 +22,7 @@ export function threadCommands(guard: {
     }),
     "thread archive": cliCommand({
       summary:
-        "Archive {threadId} and its children only when none holds open tasks or owns a lane with open tasks; otherwise refuse with exit 1. Move, finish or detach the tasks first.",
+        "Archive {threadId} and its children only when none holds open tasks or owns a lane with open tasks or a deferred train check (or marco's train holdings file cannot be read); otherwise refuse with exit 1. Move, finish or detach the tasks first.",
       options: input,
       async run({ options }) {
         const { threadId } = threadInput.parse(parseInput(options.input));

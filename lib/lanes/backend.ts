@@ -19,10 +19,11 @@ import { ReleaseService } from "../release/service.ts";
 import { releaseCommands } from "../release/cli.ts";
 import { threadHoldings, type ThreadGuardAdapters } from "../guards.ts";
 import { threadCommands } from "../guard-cli.ts";
+import { readTrainOwners } from "../train-owners.ts";
 
 export type BackendAdapters = LaneAdapters &
   ImportAdapters &
-  Omit<ThreadGuardAdapters, "ownedLanes">;
+  Omit<ThreadGuardAdapters, "ownedLanes" | "trainOwners">;
 
 export const laneRpcMethods = {
   laneImportPreview: {
@@ -78,6 +79,7 @@ export function laneBackend(bb: BbPluginApi, adapters: BackendAdapters) {
   );
   const guard: ThreadGuardAdapters = {
     ...adapters,
+    trainOwners: () => readTrainOwners(),
     ownedLanes: (threadId) =>
       repo
         .list()

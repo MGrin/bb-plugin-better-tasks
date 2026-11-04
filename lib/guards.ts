@@ -1,7 +1,9 @@
 // Archive guards: a lane or a worker thread that still holds open tasks is not
 // archived until those tasks are moved, finished or detached. Archived lanes
 // holding open in_review tasks were one source of board drift (2026-10-30).
+// A thread that owns deferred train checks (published by marco) is kept too.
 import { OPEN_STATUSES, STATUSES, type Status } from "./model.ts";
+import type { TrainCheck, TrainOwners } from "./train-owners.ts";
 
 /** A task that blocks an archive. "unknown" means the lookup failed: fail closed. */
 export interface HeldTask {
@@ -78,6 +80,8 @@ export interface ThreadGuardAdapters {
   listChildren: (threadId: string) => Promise<string[]>;
   /** Lanes this thread owns that are not archived, with their member task IDs. */
   ownedLanes: (threadId: string) => { id: string; name: string; taskIds: string[] }[];
+  /** Deferred train checks and their owner threads, from marco's published file. */
+  trainOwners: () => Promise<TrainOwners>;
 }
 
 export interface ThreadHoldings {
@@ -86,6 +90,10 @@ export interface ThreadHoldings {
   threads: string[];
   attachedTasks: (HeldTask & { threadId: string })[];
   ownedLanes: { laneId: string; name: string; ownerThreadId: string; openTasks: HeldTask[] }[];
+  /** Deferred train checks owned by a thread in the subtree. */
+  trainChecks: TrainCheck[];
+  /** Why the train holdings could not be read; non-null keeps the thread. */
+  trainUnreadable: string | null;
   scannedTasks: number;
   blocked: boolean;
 }
@@ -142,12 +150,26 @@ export async function threadHoldings(
         ownedLanes.push({ laneId: lane.id, name: lane.name, ownerThreadId: owner, openTasks });
     }
   const attachedTasks = attached.flat();
+  let owners: TrainOwners;
+  try {
+    owners = await a.trainOwners();
+  } catch {
+    owners = { ok: false, reason: "train owners lookup failed" };
+  }
+  const trainChecks = owners.ok ? owners.checks.filter((c) => members.has(c.threadId)) : [];
+  const trainUnreadable = owners.ok ? null : owners.reason;
   return {
     threadId,
     threads,
     attachedTasks,
     ownedLanes,
+    trainChecks,
+    trainUnreadable,
     scannedTasks: open.length,
-    blocked: attachedTasks.length > 0 || ownedLanes.length > 0,
+    blocked:
+      attachedTasks.length > 0 ||
+      ownedLanes.length > 0 ||
+      trainChecks.length > 0 ||
+      trainUnreadable !== null,
   };
 }

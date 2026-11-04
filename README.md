@@ -153,8 +153,13 @@ edits do not reload the task board or its descriptions.
 BB core archives a thread and its children without asking plugins, so agents
 archive through `bb better-tasks thread archive --input '{"threadId":"THREAD_ID"}'`.
 It refuses (exit 1, JSON on stdout) while the thread or any unarchived child is
-attached to an open task, or owns an unarchived lane with open tasks. Move,
-finish or detach those tasks first. `thread check` reports the same without
+attached to an open task, owns an unarchived lane with open tasks, or owns a
+deferred train check. marco publishes those checks to
+`~/.local/state/marco/train/owners.json` (override with `MARCO_TRAIN_OWNERS_FILE`):
+`{"schema_version":1,"owners":[{"thread","task","check","repo"?}]}`. A missing
+file holds nothing; an unreadable, malformed or unknown-version file keeps every
+thread and `trainUnreadable` says why. Move, finish or detach the tasks, or
+resolve the checks, first. `thread check` reports the same without
 archiving. The check scans open tasks and their attached threads; a task
 attached between the check and the archive is not caught.
 
@@ -235,7 +240,7 @@ This feature PR does not authorize a live installation or migration.
 | `lib/store.ts` | The page's copy of the board; merges snapshots and deltas by revision |
 | `lib/view.ts` | Filtering, sorting and grouping |
 | `lib/release/` | Release stage model, storage, train-only CLI writes |
-| `lib/guards.ts`, `lib/guard-cli.ts` | Lane and thread archive guards |
+| `lib/guards.ts`, `lib/guard-cli.ts`, `lib/train-owners.ts` | Lane and thread archive guards; train holdings reader |
 | `lib/virtual.ts`, `components/virtual-list.tsx` | Windowing |
 | `app.tsx`, `components/` | The page |
 

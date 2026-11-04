@@ -1,4 +1,7 @@
-import { test } from "node:test";
+import { test, beforeEach } from "node:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import {
   createFakePluginHost,
@@ -82,6 +85,11 @@ test("a task that joins during the archive check is refused, never archived unse
   assert.deepEqual(result.result.openTasks, [{ taskId: "late", key: null, status: "unknown" }]);
   assert.equal(r.get(lane.id)!.state, "active");
   await harness.lifecycle.dispose();
+});
+
+// Never read the real machine file: point every test at a missing one by default.
+beforeEach(() => {
+  process.env.MARCO_TRAIN_OWNERS_FILE = join(tmpdir(), "bt-owners-missing", "owners.json");
 });
 
 function host(world: {
@@ -207,5 +215,96 @@ test("a child beyond the first thread page still blocks the archive", async () =
   const holdings = JSON.parse(check.stdout).holdings;
   assert.equal(holdings.threads.length, 151);
   assert.deepEqual(holdings.attachedTasks.map((t: any) => t.threadId), ["thr_w120"]);
+  await h.harness.lifecycle.dispose();
+});
+
+// Train holdings: marco publishes the checks a thread still owns as a small JSON file.
+const OWNERS_ENV = "MARCO_TRAIN_OWNERS_FILE";
+
+function holdingsFile(content: string | null) {
+  const dir = mkdtempSync(join(tmpdir(), "bt-owners-"));
+  const file = join(dir, "owners.json");
+  if (content !== null) writeFileSync(file, content);
+  process.env[OWNERS_ENV] = file;
+  return { file, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+const published = (owners: unknown[]) =>
+  JSON.stringify({ schema_version: 1, updated_at: "2026-11-04T00:00:00Z", owners });
+
+const lone = () =>
+  host({ tasks: [task({ id: "t1", key: "DEMO-1", status: "done" })], attached: {}, children: { thr_lane: ["thr_child"] } });
+
+test("thread archive is refused while a thread in the subtree owns a deferred train check", async () => {
+  const f = holdingsFile(
+    published([
+      { thread: "thr_child", repo: "Flarexyz/app", task: "APP-10", check: "APP-10 check 1" },
+      { thread: "thr_elsewhere", task: "APP-11", check: "APP-11 check 1" },
+    ]),
+  );
+  const h = lone();
+  const check = await run(h, "check", "thr_lane");
+  assert.equal(check.exitCode, 1);
+  const holdings = JSON.parse(check.stdout).holdings;
+  assert.deepEqual(holdings.trainChecks, [
+    { threadId: "thr_child", repo: "Flarexyz/app", task: "APP-10", check: "APP-10 check 1" },
+  ]);
+  assert.equal(holdings.trainUnreadable, null);
+  assert.equal(holdings.blocked, true);
+  const refused = await run(h, "archive", "thr_lane");
+  assert.equal(refused.exitCode, 1);
+  assert.equal(JSON.parse(refused.stdout).outcome, "refused");
+  assert.deepEqual(h.archived, []);
+  // Another thread's check does not hold this one.
+  const free = await run(h, "archive", "thr_free");
+  assert.equal(free.exitCode, 0, free.stderr);
+  assert.deepEqual(h.archived, ["thr_free"]);
+  f.cleanup();
+  await h.harness.lifecycle.dispose();
+});
+
+test("thread archive proceeds when the holdings file is absent or lists no owner of the subtree", async () => {
+  for (const content of [null, published([])]) {
+    const f = holdingsFile(content);
+    const h = lone();
+    const archived = await run(h, "archive", "thr_lane");
+    assert.equal(archived.exitCode, 0, archived.stderr);
+    assert.deepEqual(JSON.parse(archived.stdout).holdings.trainChecks, []);
+    f.cleanup();
+    await h.harness.lifecycle.dispose();
+  }
+});
+
+test("an unreadable holdings file keeps the thread", async () => {
+  const bad = [
+    "{not json",
+    JSON.stringify({ schema_version: 2, owners: [] }),
+    JSON.stringify({ schema_version: 1, owners: [{ thread: "thr_child" }] }),
+    JSON.stringify({ schema_version: 1 }),
+    "",
+  ];
+  for (const content of bad) {
+    const f = holdingsFile(content);
+    const h = lone();
+    const refused = await run(h, "archive", "thr_lane");
+    assert.equal(refused.exitCode, 1, content);
+    const holdings = JSON.parse(refused.stdout).holdings;
+    assert.equal(holdings.blocked, true);
+    assert.match(holdings.trainUnreadable, /owners|JSON|schema/i);
+    assert.deepEqual(h.archived, []);
+    f.cleanup();
+    await h.harness.lifecycle.dispose();
+  }
+});
+
+test("a holdings path that cannot be read as a file keeps the thread", async () => {
+  const f = holdingsFile(null);
+  mkdirSync(f.file); // a directory where the file should be: EISDIR, not ENOENT
+  const h = lone();
+  const refused = await run(h, "archive", "thr_lane");
+  assert.equal(refused.exitCode, 1);
+  assert.match(JSON.parse(refused.stdout).holdings.trainUnreadable, /EISDIR|read/i);
+  assert.deepEqual(h.archived, []);
+  f.cleanup();
   await h.harness.lifecycle.dispose();
 });

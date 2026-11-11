@@ -32,7 +32,7 @@ export function releaseCommands(release: ReleaseService): Record<string, PluginC
   return {
     "release set": cliCommand({
       summary:
-        "Train tooling only (writer \"marco-train\"): CAS {operationId,taskId,stage,train,expectedRevision,writer,evidence}. Never changes task status. Conflict exits 1 with receipt; retry unchanged.",
+        "Train tooling only (writer \"marco-train\" or \"fred-train\", recorded as sent): CAS {operationId,taskId,stage,train,expectedRevision,writer,evidence}. Never changes task status. Conflict exits 1 with receipt; retry unchanged.",
       options: input,
       async run({ options }, ctx) {
         const reply = await release.set(parseInput(options.input), ctx.threadId ?? null);

@@ -166,8 +166,8 @@ attached between the check and the archive is not caught.
 ### Release stage
 
 Each task may carry a release stage: `merged-dev`, `nominated`, `boarded`,
-`go`, `live`, `verified`. Train tooling (writer `marco-train`) records it with
-`bb better-tasks release set`; the board shows it read-only in the task detail.
+`go`, `live`, `verified`. Train tooling (writer `marco-train` or `fred-train`; the record keeps the writer
+that sent the write) records it with `bb better-tasks release set`; the board shows it read-only in the task detail.
 The stage never changes the task status, and status edits never change the
 stage. See [the release skill](skills/release/SKILL.md).
 

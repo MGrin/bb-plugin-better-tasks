@@ -30,8 +30,12 @@ export const RELEASE_STAGE_LABEL: Record<ReleaseStage, string> = {
   verified: "Verified",
 };
 
-/** The one tool allowed to write stages. A guardrail and an audit field, not a credential. */
-export const RELEASE_WRITER = "marco-train";
+/**
+ * The tools allowed to write stages: Marco's release train and Fred's. An
+ * explicit list, not a pattern. A guardrail and an audit field, not a credential.
+ */
+export const RELEASE_WRITERS = ["marco-train", "fred-train"] as const;
+export type ReleaseWriter = (typeof RELEASE_WRITERS)[number];
 
 const strictId = z
   .string()
@@ -46,6 +50,7 @@ const trainId = z
 const timestamp = z.iso.datetime();
 const stage = z.enum(RELEASE_STAGES);
 const evidence = z.string().max(2000);
+const writer = z.enum(RELEASE_WRITERS);
 
 export const releaseRecordSchema = z
   .object({
@@ -53,7 +58,7 @@ export const releaseRecordSchema = z
     stage,
     train: trainId.nullable(),
     revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    writer: z.literal(RELEASE_WRITER),
+    writer,
     actorThreadId: strictId.nullable(),
     evidence,
     updatedAt: timestamp,
@@ -73,7 +78,7 @@ export const releaseSetSchema = z
     stage,
     train: trainId.nullable().default(null),
     expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    writer: z.literal(RELEASE_WRITER),
+    writer,
     evidence: evidence.default(""),
   })
   .strict()

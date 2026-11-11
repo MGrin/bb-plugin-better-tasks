@@ -20,7 +20,7 @@ bb better-tasks release operation --input '{"operationId":"UUID"}'
 
 ## Writing (train tooling only)
 
-Only train tooling writes, with `writer: "marco-train"`. Lanes, workers and people never set a stage by hand. The writer field is an audit guardrail, not a credential; every write also records the calling thread.
+Only train tooling writes. Marco's train sends `writer: "marco-train"`; Fred's train sends `writer: "fred-train"`. These are the only two accepted values (an explicit list, not a pattern), and the record stores the writer that sent the write. Lanes, workers and people never set a stage by hand. The writer field is an audit guardrail, not a credential; every write also records the calling thread.
 
 ```sh
 bb better-tasks release set --input '{"operationId":"UUID","taskId":"STABLE_TASK_ID","stage":"boarded","train":"TRAIN_ID","expectedRevision":2,"writer":"marco-train","evidence":"train TRAIN_ID built at SHA"}'

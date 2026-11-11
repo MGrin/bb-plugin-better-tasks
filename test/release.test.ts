@@ -97,6 +97,40 @@ test("input validation: train ID per stage, writer identity, missing or unknown 
   await harness.lifecycle.dispose();
 });
 
+test("the record stores the request's writer; only marco-train and fred-train are accepted", async () => {
+  const { s, r, harness } = setup();
+  const reply: any = await s.set(write("merged-dev", 0, { writer: "fred-train" }), "thr_fred");
+  assert.equal(reply.receipt.after.writer, "fred-train");
+  assert.equal(reply.receipt.request.writer, "fred-train");
+  assert.equal(r.get("task")!.writer, "fred-train");
+  // The next write by the other writer is recorded under its own name.
+  const next: any = await s.set(write("nominated", 1), "thr_marco");
+  assert.equal(next.receipt.after.writer, "marco-train");
+  assert.deepEqual(
+    r.history("task", 10).map((h) => h.writer),
+    ["marco-train", "fred-train"],
+  );
+  // An explicit list, not a pattern.
+  for (const writer of ["someone", "Fred-Train", "fred-train ", "marco-train-2", "", null, 7]) {
+    await assert.rejects(() => s.set(write("boarded", 2, { writer }), null), /writer/, String(writer));
+  }
+  assert.equal(r.history("task", 10).length, 2);
+  // The same operation ID cannot be replayed under another writer.
+  const input = write("boarded", 2, { writer: "fred-train" });
+  await s.set(input, null);
+  await assert.rejects(() => s.set({ ...input, writer: "marco-train" }, null), /operation_id_reused/);
+  await harness.lifecycle.dispose();
+});
+
+test("records written by marco-train before fred-train existed still read back", async () => {
+  const { s, r, harness } = setup();
+  await s.set(write("merged-dev", 0), "thr_old");
+  const stored = r.db.prepare("SELECT data FROM release_stages WHERE task_id='task'").get() as { data: string };
+  assert.equal(JSON.parse(stored.data).writer, "marco-train");
+  assert.equal(r.get("task")!.writer, "marco-train");
+  await harness.lifecycle.dispose();
+});
+
 test("an operation ID replays its receipt once and cannot be reused for another write", async () => {
   const { s, r, harness } = setup();
   const input = write("merged-dev", 0);
